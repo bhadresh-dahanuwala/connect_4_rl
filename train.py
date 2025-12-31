@@ -22,7 +22,7 @@ def main():
         help="Number of games to be played in the evaluation phase"
     )
     parser.add_argument(
-        "--simulations", type=int, default=50,
+        "--simulations", type=int, default=400,
         help="MCTS simulations per move"
     )
     parser.add_argument(

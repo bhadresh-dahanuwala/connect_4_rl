@@ -46,6 +46,14 @@ def main():
         help="Learning rate"
     )
     parser.add_argument(
+        "--num-blocks", type=int, default=10,
+        help="Number of residual blocks in the neural network"
+    )
+    parser.add_argument(
+        "--num-channels", type=int, default=128,
+        help="Number of channels in the neural network"
+    )
+    parser.add_argument(
         "--resume", type=str, default=None,
         help="Path to checkpoint to resume from"
     )
@@ -63,12 +71,10 @@ def main():
         'max_buffer_size': args.max_buffer_size,
         'batch_size': args.batch_size,
         'lr': args.lr,
+        'num_blocks': args.num_blocks,
+        'num_channels': args.num_channels,
         'resume': args.resume
     }
-
-    print("Training Configuration:")
-    for k, v in config.items():
-        print(f"  {k}: {v}")
 
     trainer = Trainer(config)
     trainer.run()

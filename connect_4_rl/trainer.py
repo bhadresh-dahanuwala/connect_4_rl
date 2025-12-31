@@ -14,9 +14,12 @@ from connect_4_rl.env import Connect4Env, PLAYER_BLUE, PLAYER_RED
 from connect_4_rl.model import Connect4Net
 
 
-def self_play_worker(model_state, simulations, c_puct):
+def self_play_worker(model_config, model_state, simulations, c_puct):
     torch.set_num_threads(1)
-    model = Connect4Net().to('cpu')
+    model = Connect4Net(
+        num_channels=model_config['num_channels'],
+        num_res_blocks=model_config['num_blocks']
+    ).to('cpu')
     model.load_state_dict(model_state)
     model.eval()
 
@@ -70,13 +73,21 @@ def self_play_worker(model_state, simulations, c_puct):
             return result_examples, step_count, result_str
 
 
-def eval_worker(challenger_state, champion_state, simulations, c_puct, p1_is_challenger):
+def eval_worker(model_config, challenger_state, champion_state, simulations, c_puct, p1_is_challenger):
     torch.set_num_threads(1)
-    challenger = Connect4Net().to('cpu')
+
+    # Rebuild models with correct architecture
+    challenger = Connect4Net(
+        num_channels=model_config['num_channels'],
+        num_res_blocks=model_config['num_blocks']
+    ).to('cpu')
     challenger.load_state_dict(challenger_state)
     challenger.eval()
 
-    champion = Connect4Net().to('cpu')
+    champion = Connect4Net(
+        num_channels=model_config['num_channels'],
+        num_res_blocks=model_config['num_blocks']
+    ).to('cpu')
     champion.load_state_dict(champion_state)
     champion.eval()
 
@@ -129,10 +140,28 @@ class Trainer:
         print(f"Training device: {self.train_device}")
         print(f"Self-play/Eval device: {self.cpu_device}")
 
-        self.model = Connect4Net().to(self.train_device)
+        self.model = Connect4Net(
+            num_channels=self.args['num_channels'],
+            num_res_blocks=self.args['num_blocks']
+        ).to(self.train_device)
         self.optimizer = optim.Adam(
             self.model.parameters(), lr=self.args['lr'], weight_decay=1e-4
         )
+
+        # Print Configuration and Model Summary
+        print("\n" + "=" * 40)
+        print("  TRAINING INITIALIZED")
+        print("=" * 40)
+        print("Configuration:")
+        for k, v in self.args.items():
+            print(f"  {k}: {v}")
+
+        num_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        print("\nModel Details:")
+        print(f"  Parameters: {num_params:,}")
+        # Note: Since defaults are in model.py, we could extract them if we made them members
+        # For now, printing the parameter count is a good proxy for capacity.
+        print("=" * 40 + "\n")
 
         # Scheduler: Drop LR by 10x at 30% and 60% of total iterations
         milestones = [int(self.args['iterations'] * 0.3), int(self.args['iterations'] * 0.6)]
@@ -219,9 +248,15 @@ class Trainer:
         examples = []
         num_games = self.args['num_self_play_games']
 
+        # Prepare config for workers to rebuild model
+        model_config = {
+            'num_channels': self.args['num_channels'],
+            'num_blocks': self.args['num_blocks']
+        }
+
         futures = [
             self.executor.submit(
-                self_play_worker, model_state,
+                self_play_worker, model_config, model_state,
                 self.args['num_simulations'], self.args['c_puct']
             )
             for i in range(num_games)
@@ -300,13 +335,19 @@ class Trainer:
         if games == 0:
             return 0
 
-        futures = []
-        for i in range(games):
-            p1_is_challenger = i % 2 == 0
-            futures.append(self.executor.submit(
-                eval_worker, challenger_state, champion_state,
-                self.args['num_simulations'], self.args['c_puct'], p1_is_challenger
-            ))
+        # Prepare config for workers to rebuild model
+        model_config = {
+            'num_channels': self.args['num_channels'],
+            'num_blocks': self.args['num_blocks']
+        }
+
+        futures = [
+            self.executor.submit(
+                eval_worker, model_config, challenger_state, champion_state,
+                self.args['num_simulations'], self.args['c_puct'], i % 2 == 0
+            )
+            for i in range(games)
+        ]
 
         for i, future in enumerate(as_completed(futures)):
             result, step_count, winner_name = future.result()

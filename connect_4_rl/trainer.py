@@ -130,7 +130,9 @@ class Trainer:
         print(f"Self-play/Eval device: {self.cpu_device}")
 
         self.model = Connect4Net().to(self.train_device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001, weight_decay=1e-4)
+        self.optimizer = optim.Adam(
+            self.model.parameters(), lr=self.args['lr'], weight_decay=1e-4
+        )
 
         # Scheduler: Drop LR by 10x at 30% and 60% of total iterations
         milestones = [int(self.args['iterations'] * 0.3), int(self.args['iterations'] * 0.6)]

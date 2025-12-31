@@ -18,7 +18,7 @@ def main():
         help="Number of epochs for the training phase"
     )
     parser.add_argument(
-        "--eval-games", type=int, default=20,
+        "--eval-games", type=int, default=50,
         help="Number of games to be played in the evaluation phase"
     )
     parser.add_argument(
@@ -38,8 +38,12 @@ def main():
         help="Maximum number of examples to store in replay buffer"
     )
     parser.add_argument(
-        "--batch-size", type=int, default=1024,
+        "--batch-size", type=int, default=512,
         help="Batch size for training"
+    )
+    parser.add_argument(
+        "--lr", type=float, default=0.0003,
+        help="Learning rate"
     )
     parser.add_argument(
         "--resume", type=str, default=None,
@@ -58,6 +62,7 @@ def main():
         'workers': args.workers,
         'max_buffer_size': args.max_buffer_size,
         'batch_size': args.batch_size,
+        'lr': args.lr,
         'resume': args.resume
     }
 

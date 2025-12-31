@@ -3,6 +3,7 @@ import os
 import random
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -12,6 +13,12 @@ import torch.optim as optim
 from connect_4_rl.agent import AlphaZeroAgent
 from connect_4_rl.env import Connect4Env, PLAYER_BLUE, PLAYER_RED
 from connect_4_rl.model import Connect4Net
+
+
+def log(message):
+    """Print a message with timestamp prefix."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{timestamp}] {message}")
 
 
 def self_play_worker(model_config, model_state, simulations, c_puct):
@@ -137,8 +144,8 @@ class Trainer:
         self.args = args
         self.cpu_device = torch.device('cpu')
         self.train_device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
-        print(f"Training device: {self.train_device}")
-        print(f"Self-play/Eval device: {self.cpu_device}")
+        log(f"Training device: {self.train_device}")
+        log(f"Self-play/Eval device: {self.cpu_device}")
 
         self.model = Connect4Net(
             num_channels=self.args['num_channels'],
@@ -149,19 +156,17 @@ class Trainer:
         )
 
         # Print Configuration and Model Summary
-        print("\n" + "=" * 40)
-        print("  TRAINING INITIALIZED")
-        print("=" * 40)
-        print("Configuration:")
+        log("=" * 40)
+        log("  TRAINING INITIALIZED")
+        log("=" * 40)
+        log("Configuration:")
         for k, v in self.args.items():
-            print(f"  {k}: {v}")
+            log(f"  {k}: {v}")
 
         num_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
-        print("\nModel Details:")
-        print(f"  Parameters: {num_params:,}")
-        # Note: Since defaults are in model.py, we could extract them if we made them members
-        # For now, printing the parameter count is a good proxy for capacity.
-        print("=" * 40 + "\n")
+        log("Model Details:")
+        log(f"  Parameters: {num_params:,}")
+        log("=" * 40)
 
         # Scheduler: Drop LR by 10x at 30% and 60% of total iterations
         milestones = [int(self.args['iterations'] * 0.3), int(self.args['iterations'] * 0.6)]
@@ -177,15 +182,15 @@ class Trainer:
 
         if self.args['resume']:
             if os.path.isfile(self.args['resume']):
-                print(f"Loading checkpoint from {self.args['resume']}")
+                log(f"Loading checkpoint from {self.args['resume']}")
                 checkpoint = torch.load(self.args['resume'])
                 self.model.load_state_dict(checkpoint['model_state_dict'])
                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
                 self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
                 self.start_iteration = checkpoint['iteration'] + 1
-                print(f"Resuming from iteration {self.start_iteration}")
+                log(f"Resuming from iteration {self.start_iteration}")
             else:
-                print(f"Checkpoint not found at {self.args['resume']}")
+                log(f"Checkpoint not found at {self.args['resume']}")
 
         # Initialize persistent executor
         self.executor = ProcessPoolExecutor(max_workers=self.args['workers'])
@@ -193,14 +198,14 @@ class Trainer:
     def run(self):
         try:
             for i in range(self.start_iteration, self.args['iterations']):
-                print(f"Iteration {i+1}/{self.args['iterations']}")
+                log(f"Iteration {i+1}/{self.args['iterations']}")
 
                 # 1. Self Play
                 # Get CPU state dict for workers
                 model_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
                 new_examples = self.self_play(model_state)
                 self.examples.extend(new_examples)
-                print(f"Replay Buffer Size: {len(self.examples)}")
+                log(f"Replay Buffer Size: {len(self.examples)}")
 
                 # 2. Train
                 champion_state = copy.deepcopy(model_state)
@@ -210,13 +215,13 @@ class Trainer:
                 # Step the scheduler
                 self.scheduler.step()
                 current_lr = self.optimizer.param_groups[0]['lr']
-                print(f"Learning Rate: {current_lr}")
+                log(f"Learning Rate: {current_lr}")
 
                 # 3. Evaluate
-                print("Evaluating against previous version...")
+                log("Evaluating against previous version...")
                 challenger_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
                 win_ratio = self.evaluate(challenger_state, champion_state)
-                print(f"Challenger Win Ratio: {win_ratio:.2f}")
+                log(f"Challenger Win Ratio: {win_ratio:.2f}")
 
                 # Save checkpoint state
                 checkpoint_state = {
@@ -227,13 +232,13 @@ class Trainer:
                 }
 
                 if win_ratio >= 0.55:
-                    print("New Champion!")
+                    log("New Champion!")
                     torch.save(
                         checkpoint_state,
                         os.path.join(self.checkpoint_dir, "best_model.pt")
                     )
                 else:
-                    print("Challenger failed. Reverting to previous champion.")
+                    log("Challenger failed. Reverting to previous champion.")
                     # Load back original weights to GPU model
                     self.model.load_state_dict(champion_state)
 
@@ -265,13 +270,13 @@ class Trainer:
         for i, future in enumerate(as_completed(futures)):
             game_examples, step_count, result_str = future.result()
             examples += game_examples
-            print(f"[Self Play] Game {i+1} finished in {step_count} steps. Result: {result_str}")
+            log(f"[Self Play] Game {i+1} finished in {step_count} steps. Result: {result_str}")
 
-        print(f"Self Play collected {len(examples)} examples")
+        log(f"Self Play collected {len(examples)} examples")
         return examples
 
     def train(self, examples):
-        print("Training...")
+        log("Training...")
         self.model.train()
         batch_size = self.args['batch_size']
         epochs = self.args['epochs']
@@ -321,7 +326,7 @@ class Trainer:
             avg_loss = total_loss / batch_count
             avg_loss_v = total_loss_v / batch_count
             avg_loss_pi = total_loss_pi / batch_count
-            print(
+            log(
                 f"Epoch {epoch+1}/{epochs} - "
                 f"Loss: {avg_loss:.4f} (V: {avg_loss_v:.4f}, P: {avg_loss_pi:.4f})"
             )
@@ -357,7 +362,7 @@ class Trainer:
                 champion_wins += 1
             else:
                 draws += 1
-            print(f"[Evaluation] Game {i+1} finished in {step_count} steps. Winner: {winner_name}")
+            log(f"[Evaluation] Game {i+1} finished in {step_count} steps. Winner: {winner_name}")
 
-        print(f"Challenger: {challenger_wins}, Champion: {champion_wins}, Draws: {draws}")
+        log(f"Challenger: {challenger_wins}, Champion: {champion_wins}, Draws: {draws}")
         return (challenger_wins + 0.5 * draws) / games

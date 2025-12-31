@@ -1,5 +1,7 @@
 import numpy as np
+
 from connect_4_rl.mcts import MCTS
+
 
 class AlphaZeroAgent:
     def __init__(self, model, num_simulations=100, c_puct=1.0, device='cpu'):

@@ -1,0 +1,15 @@
+# Self Play Phase
+
+- Display the number of steps in the game
+- Display result
+
+# Training Phase
+
+- Display Loss, `V` and `P` values (per epoch)
+
+# Evaluation Phase
+
+- Display the number of steps in the game
+- Display the result
+- Address the player by `Challenger` and `Champion` to make it easy to understand.
+

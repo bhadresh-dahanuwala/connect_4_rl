@@ -1,0 +1,1 @@
+- The virtual environment is located at `/Users/bhadresh/Library/Caches/pypoetry/virtualenvs/connect-4-rl-VE_y6fQP-py3.13`

@@ -227,13 +227,20 @@ class Trainer:
                 current_lr = self.optimizer.param_groups[0]['lr']
                 log(f"Learning Rate: {current_lr}")
 
-                # 3. Evaluate
+                # 3. Evaluate (for monitoring only - no gating)
                 log("Evaluating against previous version...")
                 challenger_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
                 win_ratio = self.evaluate(challenger_state, champion_state)
-                log(f"Challenger Win Ratio: {win_ratio:.2f}")
+                log(f"Win Ratio vs Previous: {win_ratio:.2f}")
 
-                # Save checkpoint state
+                if win_ratio >= 0.55:
+                    log("Improved over previous iteration!")
+                elif win_ratio <= 0.45:
+                    log("Regression detected (keeping new model anyway)")
+                else:
+                    log("Similar performance to previous iteration")
+
+                # Save checkpoint state (always keep trained model)
                 checkpoint_state = {
                     'iteration': i,
                     'model_state_dict': self.model.state_dict(),
@@ -241,17 +248,11 @@ class Trainer:
                     'scheduler_state_dict': self.scheduler.state_dict()
                 }
 
-                if win_ratio >= 0.55:
-                    log("New Champion!")
-                    torch.save(
-                        checkpoint_state,
-                        os.path.join(self.checkpoint_dir, "best_model.pt")
-                    )
-                else:
-                    log("Challenger failed. Reverting to previous champion.")
-                    # Load back original weights to GPU model
-                    self.model.load_state_dict(champion_state)
-
+                # Always save as best model (no gating)
+                torch.save(
+                    checkpoint_state,
+                    os.path.join(self.checkpoint_dir, "best_model.pt")
+                )
                 torch.save(
                     checkpoint_state,
                     os.path.join(self.checkpoint_dir, f"checkpoint_{i}.pt")

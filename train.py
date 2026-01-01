@@ -42,7 +42,7 @@ def main():
         help="Batch size for training"
     )
     parser.add_argument(
-        "--lr", type=float, default=0.0003,
+        "--lr", type=float, default=0.0001,
         help="Learning rate"
     )
     parser.add_argument(

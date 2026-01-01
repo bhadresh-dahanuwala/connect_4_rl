@@ -115,14 +115,19 @@ def eval_worker(model_config, challenger_state, champion_state, simulations, c_p
     step_count = 0
     terminated = False
     while not terminated:
-        # Use small temperature for first 10 moves to add variety
-        temp = 0.3 if step_count < 10 else 0.0
+        # Use temperature + noise for first 8 moves to create diverse openings
+        if step_count < 8:
+            temp = 0.8
+            noise = True
+        else:
+            temp = 0.0
+            noise = False
 
         current_player = info['current_player']
         if current_player == PLAYER_RED:
-            action, _ = agent1.select_move(env, temp, add_noise=False)
+            action, _ = agent1.select_move(env, temp, add_noise=noise)
         else:
-            action, _ = agent2.select_move(env, temp, add_noise=False)
+            action, _ = agent2.select_move(env, temp, add_noise=noise)
 
         _, reward, terminated, _, info = env.step(action)
         step_count += 1

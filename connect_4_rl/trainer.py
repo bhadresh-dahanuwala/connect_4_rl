@@ -38,7 +38,8 @@ def self_play_worker(model_config, model_state, simulations, c_puct):
 
     step_count = 0
     while True:
-        temp = 1.0 if step_count < 15 else 0.0
+        # Gradual temperature decay: 1.0 → 0.1 over 30 moves
+        temp = max(0.1, 1.0 - step_count * 0.03)
 
         action, action_probs = agent.select_move(env, temp, add_noise=True)
 

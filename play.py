@@ -8,6 +8,14 @@ import sys
 import pygame
 import torch
 
+
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and PyInstaller bundle."""
+    if hasattr(sys, '_MEIPASS'):
+        # Running as PyInstaller bundle
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
+
 from connect_4_rl.agent import AlphaZeroAgent
 from connect_4_rl.env import Connect4Env, PLAYER_BLUE, PLAYER_RED
 from connect_4_rl.model import Connect4Net
@@ -30,6 +38,8 @@ RED_COIN = (231, 76, 60)      # Tomato / Soft Red
 YELLOW_COIN = (241, 196, 15)  # Gold / Soft Yellow
 TEXT_COLOR = (236, 240, 241)  # Off-White
 HIGHLIGHT_COLOR = (149, 165, 166)  # Concrete Grey
+LAST_MOVE_COLOR = (255, 255, 255)  # White ring for last move
+WIN_HIGHLIGHT_COLOR = (46, 204, 113)  # Green for winning chips
 
 
 class Connect4GUI:
@@ -60,6 +70,8 @@ class Connect4GUI:
         self.winner = None
         self.ai_thinking = False
         self.message = "Your Turn" if not ai_first else "AI Thinking..."
+        self.last_move = None  # (row, col) of last played chip
+        self.winning_positions = []  # List of (row, col) for winning line
 
     def load_model(self, model_path):
         if os.path.exists(model_path):
@@ -97,12 +109,23 @@ class Connect4GUI:
                 elif board[r][c] == PLAYER_BLUE:
                     color = YELLOW_COIN
 
-                pygame.draw.circle(
-                    self.screen, color,
-                    (int(c * SQUARE_SIZE + SQUARE_SIZE / 2 + OFFSET_X),
-                     int(r * SQUARE_SIZE + SQUARE_SIZE / 2 + OFFSET_Y)),
-                    RADIUS
-                )
+                center_x = int(c * SQUARE_SIZE + SQUARE_SIZE / 2 + OFFSET_X)
+                center_y = int(r * SQUARE_SIZE + SQUARE_SIZE / 2 + OFFSET_Y)
+
+                pygame.draw.circle(self.screen, color, (center_x, center_y), RADIUS)
+
+                # Highlight winning positions with green ring
+                if (r, c) in self.winning_positions:
+                    pygame.draw.circle(
+                        self.screen, WIN_HIGHLIGHT_COLOR,
+                        (center_x, center_y), RADIUS, 4
+                    )
+                # Highlight last move with white ring (if not part of winning line)
+                elif self.last_move == (r, c):
+                    pygame.draw.circle(
+                        self.screen, LAST_MOVE_COLOR,
+                        (center_x, center_y), RADIUS, 3
+                    )
 
         # Highlight column under mouse
         if not self.game_over and not self.ai_thinking:
@@ -120,7 +143,7 @@ class Connect4GUI:
     def handle_ai_move(self):
         """Run AI search in a separate thread/process to keep UI responsive."""
         self.ai_thinking = True
-        self.message = f"AI ({self.simulations} sims) is thinking..."
+        self.message = "AI is thinking..."
         self.draw_board()
 
         # Run MCTS
@@ -128,6 +151,10 @@ class Connect4GUI:
         action, _ = self.agent.select_move(self.env, temperature=0.0, add_noise=False)
 
         self.obs, reward, terminated, _, self.info = self.env.step(action)
+
+        # Track last move
+        self.last_move = (self.info['last_row'], self.info['last_action'])
+
         self.check_game_over(reward, terminated)
 
         self.ai_thinking = False
@@ -139,6 +166,11 @@ class Connect4GUI:
             self.game_over = True
             if reward == 1.0:
                 winner_id = self.info['last_player']
+                # Get winning positions
+                last_row = self.info['last_row']
+                last_col = self.info['last_action']
+                self.winning_positions = self.env.get_winning_positions(last_row, last_col)
+
                 if winner_id == self.human_player:
                     self.message = "YOU WIN!"
                 else:
@@ -169,6 +201,10 @@ class Connect4GUI:
                         valid_actions = self.obs['action_mask']
                         if valid_actions[col]:
                             self.obs, reward, terminated, _, self.info = self.env.step(col)
+
+                            # Track last move
+                            self.last_move = (self.info['last_row'], self.info['last_action'])
+
                             self.check_game_over(reward, terminated)
                             self.draw_board()  # Force update before AI starts
 
@@ -182,10 +218,20 @@ class Connect4GUI:
             clock.tick(30)
 
 
+def get_default_model_path():
+    """Get the default model path, checking bundle first, then local."""
+    # Check for bundled model first (PyInstaller bundle)
+    bundled_path = get_resource_path("best_model.pt")
+    if os.path.exists(bundled_path):
+        return bundled_path
+    # Fall back to checkpoints directory (development)
+    return "checkpoints/best_model.pt"
+
+
 def main():
     parser = argparse.ArgumentParser(description="Play Connect-4 against the AI (GUI)")
     parser.add_argument(
-        "--model", type=str, default="checkpoints/best_model.pt",
+        "--model", type=str, default=None,
         help="Path to the model checkpoint"
     )
     parser.add_argument(
@@ -203,7 +249,8 @@ def main():
 
     args = parser.parse_args()
 
-    gui = Connect4GUI(args.model, args.simulations, args.cpuct, args.ai_first)
+    model_path = args.model if args.model else get_default_model_path()
+    gui = Connect4GUI(model_path, args.simulations, args.cpuct, args.ai_first)
     gui.run()
 
 

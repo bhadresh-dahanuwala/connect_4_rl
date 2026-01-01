@@ -195,6 +195,16 @@ class Trainer:
         # Initialize persistent executor
         self.executor = ProcessPoolExecutor(max_workers=self.args['workers'])
 
+        # Save initial model as best_model.pt if it doesn't exist
+        # This ensures there's always a champion to play against
+        best_model_path = os.path.join(self.checkpoint_dir, "best_model.pt")
+        if not os.path.exists(best_model_path):
+            log("Saving initial model as best_model.pt")
+            torch.save(
+                {'model_state_dict': self.model.state_dict()},
+                best_model_path
+            )
+
     def run(self):
         try:
             for i in range(self.start_iteration, self.args['iterations']):

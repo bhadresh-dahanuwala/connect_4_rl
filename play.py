@@ -30,16 +30,18 @@ RADIUS = int(SQUARE_SIZE / 2 - 5)
 OFFSET_X = (WINDOW_WIDTH - (BOARD_COLS * SQUARE_SIZE)) // 2
 OFFSET_Y = (WINDOW_HEIGHT - (BOARD_ROWS * SQUARE_SIZE)) // 2 + 50
 
-# Colors (Eye-Friendly Dark Mode)
-BG_COLOR = (44, 62, 80)       # Dark Slate / Charcoal
-BOARD_COLOR = (52, 73, 94)    # Lighter Slate / Dim Blue-Grey
-EMPTY_COLOR = (26, 37, 47)    # Very Dark Grey
-RED_COIN = (231, 76, 60)      # Tomato / Soft Red
-YELLOW_COIN = (241, 196, 15)  # Gold / Soft Yellow
-TEXT_COLOR = (236, 240, 241)  # Off-White
-HIGHLIGHT_COLOR = (149, 165, 166)  # Concrete Grey
-LAST_MOVE_COLOR = (255, 255, 255)  # White ring for last move
-WIN_HIGHLIGHT_COLOR = (46, 204, 113)  # Green for winning chips
+# Colors (Dark Room Friendly - Warm Tones)
+BG_COLOR = (30, 28, 26)           # Dark warm grey
+BOARD_COLOR = (50, 45, 40)        # Warm dark brown
+EMPTY_COLOR = (25, 22, 20)        # Very dark brown
+RED_COIN = (180, 70, 60)          # Muted warm red
+YELLOW_COIN = (200, 150, 50)      # Muted amber/gold
+TEXT_COLOR = (200, 190, 175)      # Warm off-white
+HIGHLIGHT_COLOR = (120, 110, 100) # Warm grey
+LAST_MOVE_COLOR = (220, 200, 170) # Warm cream for last move
+WIN_HIGHLIGHT_COLOR = (220, 180, 80)  # Gold/amber for winning chips
+BUTTON_COLOR = (80, 60, 50)       # Warm brown button
+BUTTON_HOVER_COLOR = (100, 75, 60)  # Lighter warm brown on hover
 
 
 class Connect4GUI:
@@ -49,6 +51,12 @@ class Connect4GUI:
         pygame.display.set_caption("Connect-4: Human vs AlphaZero")
         self.font = pygame.font.SysFont("monospace", 40)
         self.small_font = pygame.font.SysFont("monospace", 25)
+        self.button_font = pygame.font.SysFont("monospace", 20)
+
+        # Store settings for restart
+        self.model_path = model_path
+        self.c_puct = c_puct
+        self.ai_starts = ai_first
 
         # Initialize Game & Agent
         self.env = Connect4Env()
@@ -62,16 +70,33 @@ class Connect4GUI:
         self.simulations = simulations
 
         # Player Setup
-        # Human is typically Red (1) unless AI plays first
-        self.ai_player = PLAYER_RED if ai_first else PLAYER_BLUE
-        self.human_player = PLAYER_BLUE if ai_first else PLAYER_RED
+        self._setup_players()
 
         self.game_over = False
         self.winner = None
         self.ai_thinking = False
-        self.message = "Your Turn" if not ai_first else "AI Thinking..."
         self.last_move = None  # (row, col) of last played chip
         self.winning_positions = []  # List of (row, col) for winning line
+        self._update_message()
+
+        # Button rectangles
+        button_y = OFFSET_Y + BOARD_ROWS * SQUARE_SIZE + 20
+        self.restart_button = pygame.Rect(OFFSET_X, button_y, 150, 40)
+        self.switch_button = pygame.Rect(OFFSET_X + BOARD_COLS * SQUARE_SIZE - 200, button_y, 200, 40)
+
+    def _setup_players(self):
+        """Setup player assignments based on who starts first."""
+        self.ai_player = PLAYER_RED if self.ai_starts else PLAYER_BLUE
+        self.human_player = PLAYER_BLUE if self.ai_starts else PLAYER_RED
+
+    def _update_message(self):
+        """Update the status message based on game state."""
+        if self.game_over:
+            return  # Don't update if game is over
+        if self.info['current_player'] == self.ai_player:
+            self.message = "AI is thinking..."
+        else:
+            self.message = "Your Turn"
 
     def load_model(self, model_path):
         if os.path.exists(model_path):
@@ -84,6 +109,22 @@ class Connect4GUI:
             self.model.eval()
         else:
             print(f"No model found at {model_path}. Using random initialization.")
+
+    def restart_game(self):
+        """Reset the game to initial state."""
+        self.obs, self.info = self.env.reset()
+        self._setup_players()
+        self.game_over = False
+        self.winner = None
+        self.ai_thinking = False
+        self.last_move = None
+        self.winning_positions = []
+        self._update_message()
+
+    def toggle_first_player(self):
+        """Toggle who starts first and restart the game."""
+        self.ai_starts = not self.ai_starts
+        self.restart_game()
 
     def draw_board(self):
         self.screen.fill(BG_COLOR)
@@ -138,6 +179,28 @@ class Connect4GUI:
                     3
                 )
 
+        # Draw buttons
+        mouse_pos = pygame.mouse.get_pos()
+
+        # Restart button
+        restart_color = BUTTON_HOVER_COLOR if self.restart_button.collidepoint(mouse_pos) else BUTTON_COLOR
+        pygame.draw.rect(self.screen, restart_color, self.restart_button, border_radius=5)
+        restart_text = self.button_font.render("Restart", True, TEXT_COLOR)
+        self.screen.blit(restart_text, (
+            self.restart_button.centerx - restart_text.get_width() // 2,
+            self.restart_button.centery - restart_text.get_height() // 2
+        ))
+
+        # Switch first player button
+        switch_color = BUTTON_HOVER_COLOR if self.switch_button.collidepoint(mouse_pos) else BUTTON_COLOR
+        pygame.draw.rect(self.screen, switch_color, self.switch_button, border_radius=5)
+        first_player = "AI" if self.ai_starts else "You"
+        switch_text = self.button_font.render(f"First: {first_player}", True, TEXT_COLOR)
+        self.screen.blit(switch_text, (
+            self.switch_button.centerx - switch_text.get_width() // 2,
+            self.switch_button.centery - switch_text.get_height() // 2
+        ))
+
         pygame.display.update()
 
     def handle_ai_move(self):
@@ -180,6 +243,7 @@ class Connect4GUI:
 
     def run(self):
         clock = pygame.time.Clock()
+        ai_move_pending = False
 
         # If AI goes first, trigger it immediately
         if self.info['current_player'] == self.ai_player:
@@ -191,28 +255,51 @@ class Connect4GUI:
                     pygame.quit()
                     sys.exit()
 
-                if event.type == pygame.MOUSEBUTTONDOWN and not self.game_over and not self.ai_thinking:
-                    # Handle Human Move
-                    pos_x = event.pos[0]
-                    if OFFSET_X <= pos_x <= OFFSET_X + BOARD_COLS * SQUARE_SIZE:
-                        col = int((pos_x - OFFSET_X) // SQUARE_SIZE)
+                if event.type == pygame.MOUSEBUTTONDOWN and not self.ai_thinking:
+                    mouse_pos = event.pos
 
-                        # Check validity
-                        valid_actions = self.obs['action_mask']
-                        if valid_actions[col]:
-                            self.obs, reward, terminated, _, self.info = self.env.step(col)
+                    # Check button clicks
+                    if self.restart_button.collidepoint(mouse_pos):
+                        self.restart_game()
+                        ai_move_pending = self.info['current_player'] == self.ai_player
+                        continue
 
-                            # Track last move
-                            self.last_move = (self.info['last_row'], self.info['last_action'])
+                    if self.switch_button.collidepoint(mouse_pos):
+                        self.toggle_first_player()
+                        ai_move_pending = self.info['current_player'] == self.ai_player
+                        continue
 
-                            self.check_game_over(reward, terminated)
-                            self.draw_board()  # Force update before AI starts
+                    # Handle board clicks (only if game not over)
+                    if not self.game_over:
+                        pos_x = event.pos[0]
+                        pos_y = event.pos[1]
+                        board_bottom = OFFSET_Y + BOARD_ROWS * SQUARE_SIZE
+                        if OFFSET_X <= pos_x <= OFFSET_X + BOARD_COLS * SQUARE_SIZE and pos_y < board_bottom:
+                            col = int((pos_x - OFFSET_X) // SQUARE_SIZE)
 
-                            # Trigger AI if game continues
-                            if not self.game_over:
-                                # Small delay for visual clarity
-                                pygame.time.wait(500)
-                                self.handle_ai_move()
+                            # Check validity
+                            valid_actions = self.obs['action_mask']
+                            if valid_actions[col]:
+                                self.obs, reward, terminated, _, self.info = self.env.step(col)
+
+                                # Track last move
+                                self.last_move = (self.info['last_row'], self.info['last_action'])
+
+                                self.check_game_over(reward, terminated)
+                                self.draw_board()  # Force update before AI starts
+
+                                # Trigger AI if game continues
+                                if not self.game_over:
+                                    # Small delay for visual clarity
+                                    pygame.time.wait(500)
+                                    self.handle_ai_move()
+
+            # Handle pending AI move after restart/switch
+            if ai_move_pending and not self.ai_thinking:
+                self.draw_board()
+                pygame.time.wait(300)
+                self.handle_ai_move()
+                ai_move_pending = False
 
             self.draw_board()
             clock.tick(30)

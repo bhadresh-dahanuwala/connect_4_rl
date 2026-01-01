@@ -168,10 +168,14 @@ class Trainer:
         log(f"  Parameters: {num_params:,}")
         log("=" * 40)
 
-        # Scheduler: Drop LR by 10x at 30% and 60% of total iterations
-        milestones = [int(self.args['iterations'] * 0.3), int(self.args['iterations'] * 0.6)]
-        self.scheduler = optim.lr_scheduler.MultiStepLR(
-            self.optimizer, milestones=milestones, gamma=0.1
+        # Scheduler: Reduce LR when loss plateaus
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer,
+            mode='min',
+            factor=0.5,
+            patience=5,
+            min_lr=1e-6,
+            verbose=True,
         )
 
         self.checkpoint_dir = "checkpoints"
@@ -183,10 +187,10 @@ class Trainer:
         if self.args['resume']:
             if os.path.isfile(self.args['resume']):
                 log(f"Loading checkpoint from {self.args['resume']}")
-                checkpoint = torch.load(self.args['resume'])
+                checkpoint = torch.load(self.args['resume'], weights_only=False)
                 self.model.load_state_dict(checkpoint['model_state_dict'])
                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                # Note: Scheduler state is NOT loaded to allow LR schedule changes
                 self.start_iteration = checkpoint['iteration'] + 1
                 log(f"Resuming from iteration {self.start_iteration}")
             else:
@@ -219,13 +223,17 @@ class Trainer:
 
                 # 2. Train
                 champion_state = copy.deepcopy(model_state)
-
-                self.train(list(self.examples))
+                train_loss = self.train(list(self.examples))
 
                 # Step the scheduler
-                self.scheduler.step()
+                old_lr = self.optimizer.param_groups[0]['lr']
+                self.scheduler.step(train_loss)
                 current_lr = self.optimizer.param_groups[0]['lr']
-                log(f"Learning Rate: {current_lr}")
+
+                if current_lr < old_lr:
+                    log(f"Learning Rate reduced: {old_lr:.6f} -> {current_lr:.6f}")
+                else:
+                    log(f"Learning Rate: {current_lr:.6f}")
 
                 # 3. Evaluate (for monitoring only - no gating)
                 log("Evaluating against previous version...")
@@ -341,6 +349,8 @@ class Trainer:
                 f"Epoch {epoch+1}/{epochs} - "
                 f"Loss: {avg_loss:.4f} (V: {avg_loss_v:.4f}, P: {avg_loss_pi:.4f})"
             )
+
+        return avg_loss
 
     def evaluate(self, challenger_state, champion_state):
         challenger_wins = 0

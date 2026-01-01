@@ -101,7 +101,6 @@ def eval_worker(model_config, challenger_state, champion_state, simulations, c_p
 
     env = Connect4Env()
     _, info = env.reset()
-    temp = 0.0
 
     if p1_is_challenger:
         p1_model = challenger
@@ -116,6 +115,9 @@ def eval_worker(model_config, challenger_state, champion_state, simulations, c_p
     step_count = 0
     terminated = False
     while not terminated:
+        # Use small temperature for first 10 moves to add variety
+        temp = 0.3 if step_count < 10 else 0.0
+
         current_player = info['current_player']
         if current_player == PLAYER_RED:
             action, _ = agent1.select_move(env, temp, add_noise=False)

@@ -55,11 +55,12 @@ class MCTS:
             # Evaluation
             leaf_value = 0.0
             if terminated:
-                # If reward is 1.0 (Win), it means the player who just moved (Parent of current node) won.
-                # So the current node (next player) is in a losing state -> -1.0
+                # If reward is 1.0 (Win), the player who just moved won.
+                # Value is +1.0 from winner's perspective. Backpropagation alternates
+                # signs, so parent (loser's move) will get -1.0.
                 # If reward is 0.0 (Draw), it's 0.0
                 if reward == 1.0:
-                    leaf_value = -1.0
+                    leaf_value = 1.0
                 else:
                     leaf_value = 0.0
             else:

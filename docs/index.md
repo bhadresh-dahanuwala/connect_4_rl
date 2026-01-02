@@ -15,6 +15,7 @@ an 8x8 board, designed for self-play training.
 
 - [Installation](installation.md) - Setup and dependencies
 - [Environment Specification](environment.md) - Board, actions, rewards, state
+- [Training Guide](training.md) - AlphaZero training loop and configuration
 - [API Reference](api.md) - Complete API documentation
 - [Examples](examples.md) - Usage examples and self-play training
 

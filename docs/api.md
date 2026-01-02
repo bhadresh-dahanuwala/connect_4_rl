@@ -186,6 +186,195 @@ Output:
 
 ---
 
+## Agents & Training
+
+### AlphaZeroAgent
+
+```python
+from connect_4_rl.agent import AlphaZeroAgent
+```
+
+An agent that uses MCTS guided by a neural network to select moves.
+
+#### Constructor
+
+```python
+AlphaZeroAgent(
+    model: torch.nn.Module,
+    num_simulations: int = 100,
+    c_puct: float = 1.0,
+    device: str = 'cpu'
+)
+```
+
+**Parameters:**
+
+- `model`: The neural network instance (`Connect4Net`)
+- `num_simulations`: Number of MCTS simulations per move
+- `c_puct`: Exploration constant for MCTS
+- `device`: Device to run inference on ('cpu' or 'cuda'/'mps')
+
+#### select_move()
+
+```python
+select_move(
+    env: Connect4Env,
+    temperature: float = 1.0,
+    add_noise: bool = False
+) -> tuple[int, np.ndarray]
+```
+
+Select a move using the MCTS policy.
+
+**Parameters:**
+
+- `env`: The current game environment
+- `temperature`: Controls exploration (higher = more random)
+- `add_noise`: If `True`, adds Dirichlet noise to root priors (for exploration)
+
+**Returns:**
+
+- `action`: Selected column index
+- `action_probs`: Probability distribution over actions (policy)
+
+---
+
+### MCTS
+
+```python
+from connect_4_rl.mcts import MCTS
+```
+
+Monte Carlo Tree Search implementation for AlphaZero.
+
+#### Constructor
+
+```python
+MCTS(
+    model: torch.nn.Module,
+    num_simulations: int = 100,
+    c_puct: float = 1.0,
+    device: str = 'cpu'
+)
+```
+
+#### search()
+
+```python
+search(env: Connect4Env, add_noise: bool = False) -> Node
+```
+
+Performs MCTS simulations from the current state.
+
+**Returns:**
+
+- `root`: The root node of the search tree containing visit counts and values.
+
+#### get_action_probs()
+
+```python
+get_action_probs(
+    env: Connect4Env,
+    temperature: float = 1.0,
+    add_noise: bool = False
+) -> np.ndarray
+```
+
+Runs MCTS and returns the action probability distribution based on visit counts.
+
+---
+
+### Connect4Net
+
+```python
+from connect_4_rl.model import Connect4Net
+```
+
+Residual Neural Network for the AlphaZero agent.
+
+#### Constructor
+
+```python
+Connect4Net(num_channels: int = 128, num_res_blocks: int = 10)
+```
+
+**Parameters:**
+
+- `num_channels`: Number of filters in convolutional layers
+- `num_res_blocks`: Number of residual blocks in the tower
+
+#### forward()
+
+```python
+forward(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]
+```
+
+**Input:**
+
+- `x`: Tensor of shape `(Batch, 3, 8, 8)` representing the board state.
+
+**Returns:**
+
+- `policy`: Logits for the 8 column actions `(Batch, 8)`
+- `value`: Win probability `(Batch, 1)` in range `[-1, 1]`
+
+---
+
+### Trainer
+
+```python
+from connect_4_rl.trainer import Trainer
+```
+
+Orchestrates the training process: Self-Play, Training, and Evaluation.
+
+#### Constructor
+
+```python
+Trainer(args: dict)
+```
+
+**Parameters:**
+
+- `args`: Dictionary containing configuration:
+    - `iterations`: Total training iterations
+    - `num_self_play_games`: Games per iteration
+    - `num_simulations`: MCTS simulations per move
+    - `batch_size`: Training batch size
+    - `epochs`: Training epochs per iteration
+    - `lr`: Learning rate
+    - `num_channels`: Model complexity
+    - `num_blocks`: Model depth
+    - `workers`: Number of parallel processes
+
+#### run()
+
+```python
+run()
+```
+
+Executes the main training loop. Saves checkpoints to `checkpoints/`.
+
+#### self_play()
+
+```python
+self_play(model_state: dict) -> list
+```
+
+Generates training examples by playing games against itself.
+Uses uniform random moves for the first 5 steps, then MCTS with temperature decay.
+
+#### evaluate()
+
+```python
+evaluate(challenger_state: dict, champion_state: dict) -> float
+```
+
+Evaluates a new model (challenger) against the current best (champion).
+Returns the win ratio for the challenger.
+
+---
+
 ## Constants
 
 ```python

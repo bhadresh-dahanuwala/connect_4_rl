@@ -1,4 +1,63 @@
-Make the following changes in @play.py
+---
+  Step 1: SSH Key for GitHub
 
-- Highlight the last played chip
-- When the game is won, highlight the chips that are connected
+  # Generate SSH key
+  ssh-keygen -t ed25519 -C "your-email@example.com"
+
+  # Start ssh-agent
+  eval "$(ssh-agent -s)"
+  ssh-add ~/.ssh/id_ed25519
+
+  # Display public key (copy this to GitHub)
+  cat ~/.ssh/id_ed25519.pub
+
+  Then add to GitHub: Settings → SSH and GPG keys → New SSH key
+
+  # Test connection
+  ssh -T git@github.com
+
+  ---
+  Step 2: Install Python 3.13
+
+  Your project requires python >= 3.13. Ubuntu 24.04 ships with 3.12, so:
+
+  # Add deadsnakes PPA for Python 3.13
+  sudo add-apt-repository ppa:deadsnakes/ppa -y
+  sudo apt update
+  sudo apt install python3.13 python3.13-venv python3.13-dev -y
+
+  # Verify
+  python3.13 --version
+
+  ---
+  Step 3: Install Poetry
+
+  # Install poetry
+  curl -sSL https://install.python-poetry.org | python3.13 -
+
+  # Add to PATH
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+  source ~/.bashrc
+
+  # Verify
+  poetry --version
+
+  # Configure poetry to use Python 3.13
+  poetry env use python3.13
+
+  ---
+  Step 4: Clone & Setup Project
+
+  # Clone repo
+  git clone git@github.com:<your-username>/connect_4_rl.git
+  cd connect_4_rl
+
+  # Checkout AWS branch
+  git checkout aws_implementation
+
+  # Install dependencies
+  poetry install
+
+  # Verify CUDA
+  poetry run python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}, GPU: {torch.cuda.get_device_name(0)}')"
+  

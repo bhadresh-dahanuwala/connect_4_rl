@@ -47,14 +47,27 @@ def self_play_worker(model_config, model_state, simulations, c_puct):
         board = obs['observation']
         action_mask = obs['action_mask']
 
-        # Standard AlphaZero temperature schedule
-        # High temp for exploration in opening, low/zero later
-        if step_count < 15:
-            temp = 1.0
+        # 1. Force 1 random move at start to guarantee opening diversity
+        # This prevents the model from collapsing into a single opening line
+        # while maintaining high data quality (unlike 5 random moves).
+        if step_count == 0:
+            valid_actions = np.where(action_mask == 1)[0]
+            action = np.random.choice(valid_actions)
+            # For training, we assign probability 1.0 to the chosen random move
+            # so the network learns this is a "valid" path to explore.
+            action_probs = np.zeros(len(action_mask), dtype=np.float32)
+            action_probs[action] = 1.0
         else:
-            temp = 0.0
+            # 2. Use MCTS with high temperature for exploration
+            # temp=1.0 allows probability-based selection (exploration)
+            # temp=0.0 forces "best" move selection (exploitation)
+            # We keep exploration high for 20 moves (approx 2/3 of avg game)
+            if step_count < 20:
+                temp = 1.0
+            else:
+                temp = 0.0
 
-        action, action_probs = agent.select_move(env, temp, add_noise=True)
+            action, action_probs = agent.select_move(env, temp, add_noise=True)
 
         canonical_board = board.copy()
         if current_player == PLAYER_BLUE:

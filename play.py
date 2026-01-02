@@ -45,7 +45,7 @@ BUTTON_HOVER_COLOR = (100, 75, 60)  # Lighter warm brown on hover
 
 
 class Connect4GUI:
-    def __init__(self, model_path, simulations, c_puct, ai_first):
+    def __init__(self, model_path, simulations, c_puct, ai_first, num_channels=128, num_blocks=10):
         pygame.init()
         self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
         pygame.display.set_caption("Connect-4: Human vs AlphaZero")
@@ -63,7 +63,7 @@ class Connect4GUI:
         self.obs, self.info = self.env.reset()
 
         self.device = 'cpu'
-        self.model = Connect4Net().to(self.device)
+        self.model = Connect4Net(num_channels=num_channels, num_res_blocks=num_blocks).to(self.device)
         self.load_model(model_path)
 
         self.agent = AlphaZeroAgent(self.model, simulations, c_puct, self.device)
@@ -333,11 +333,22 @@ def main():
         "--ai-first", action="store_true",
         help="Let the AI play first (as Red)"
     )
+    parser.add_argument(
+        "--num-channels", type=int, default=128,
+        help="Number of channels in the neural network"
+    )
+    parser.add_argument(
+        "--num-blocks", type=int, default=10,
+        help="Number of residual blocks in the neural network"
+    )
 
     args = parser.parse_args()
 
     model_path = args.model if args.model else get_default_model_path()
-    gui = Connect4GUI(model_path, args.simulations, args.cpuct, args.ai_first)
+    gui = Connect4GUI(
+        model_path, args.simulations, args.cpuct, args.ai_first,
+        num_channels=args.num_channels, num_blocks=args.num_blocks
+    )
     gui.run()
 
 

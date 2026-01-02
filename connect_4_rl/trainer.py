@@ -47,16 +47,14 @@ def self_play_worker(model_config, model_state, simulations, c_puct):
         board = obs['observation']
         action_mask = obs['action_mask']
 
-        if step_count < 5:
-            # First 5 moves: uniform random for diverse openings
-            valid_actions = np.where(action_mask == 1)[0]
-            action = np.random.choice(valid_actions)
-            action_probs = action_mask.astype(np.float32)
-            action_probs /= action_probs.sum()
+        # Standard AlphaZero temperature schedule
+        # High temp for exploration in opening, low/zero later
+        if step_count < 15:
+            temp = 1.0
         else:
-            # After move 5: MCTS with gradual temperature decay
-            temp = max(0.1, 1.0 - (step_count - 5) * 0.03)
-            action, action_probs = agent.select_move(env, temp, add_noise=True)
+            temp = 0.0
+
+        action, action_probs = agent.select_move(env, temp, add_noise=True)
 
         canonical_board = board.copy()
         if current_player == PLAYER_BLUE:
@@ -234,7 +232,7 @@ class Trainer:
                 status = "IMPROVED" if win_ratio >= 0.55 else "REGRESSED" if win_ratio <= 0.45 else "STABLE"
                 log(f"[Summary] Loss={train_loss:.4f}, LR={current_lr:.6f}, Buffer={len(self.examples)}, Status={status}")
 
-                # Save checkpoint state (always keep trained model)
+                # Save checkpoint state (always keep trained model history)
                 checkpoint_state = {
                     'iteration': i,
                     'model_state_dict': self.model.state_dict(),
@@ -242,15 +240,20 @@ class Trainer:
                     'scheduler_state_dict': self.scheduler.state_dict()
                 }
 
-                # Always save as best model (no gating)
-                torch.save(
-                    checkpoint_state,
-                    os.path.join(self.checkpoint_dir, "best_model.pt")
-                )
                 torch.save(
                     checkpoint_state,
                     os.path.join(self.checkpoint_dir, f"checkpoint_{i}.pt")
                 )
+
+                # Gating: Only update best_model.pt if we improved or it's the first run
+                if win_ratio >= 0.55 or i == 0:
+                    log(f"  > New Champion! Saving best_model.pt (Win Rate: {win_ratio:.0%})")
+                    torch.save(
+                        checkpoint_state,
+                        os.path.join(self.checkpoint_dir, "best_model.pt")
+                    )
+                else:
+                    log(f"  > Model did not improve (Win Rate: {win_ratio:.0%}). keeping previous best.")
         finally:
             self.executor.shutdown()
 

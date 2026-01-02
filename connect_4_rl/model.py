@@ -40,9 +40,9 @@ class Connect4Net(nn.Module):
             nn.BatchNorm2d(1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(8 * 8, 64),
+            nn.Linear(8 * 8, 256),
             nn.ReLU(),
-            nn.Linear(64, 1),
+            nn.Linear(256, 1),
             nn.Tanh()
         )
 

@@ -292,7 +292,7 @@ class Trainer:
 
         wins = {1: 0, 2: 0, 'draw': 0}
         total_steps = 0
-        for future in as_completed(futures):
+        for idx, future in enumerate(as_completed(futures)):
             game_examples, step_count, result, winner = future.result()
             examples += game_examples
             total_steps += step_count
@@ -300,6 +300,10 @@ class Trainer:
                 wins[winner] += 1
             else:
                 wins['draw'] += 1
+
+            # Log progress every 10 games
+            if (idx + 1) % 10 == 0:
+                log(f"[Self-Play] Progress: {idx + 1}/{num_games} games finished")
 
         avg_steps = total_steps / num_games
         log(f"[Self-Play] Done: {len(examples)} examples, avg {avg_steps:.1f} steps/game")

@@ -15,13 +15,19 @@ from connect_4_rl.env import Connect4Env, PLAYER_BLUE, PLAYER_RED
 from connect_4_rl.model import Connect4Net
 
 
-def log(message):
+def log(message, section=False):
     """Print a message with timestamp prefix."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{timestamp}] {message}")
+    if section:
+        print(f"\n[{timestamp}] {'─' * 50}")
+        print(f"[{timestamp}] {message}")
+        print(f"[{timestamp}] {'─' * 50}")
+    else:
+        print(f"[{timestamp}] {message}")
 
 
 def self_play_worker(model_config, model_state, simulations, c_puct):
+    """Run one self-play game in a worker process."""
     torch.set_num_threads(1)
     model = Connect4Net(
         num_channels=model_config['num_channels'],
@@ -33,18 +39,24 @@ def self_play_worker(model_config, model_state, simulations, c_puct):
     env = Connect4Env()
     obs, info = env.reset()
     examples = []
-
     agent = AlphaZeroAgent(model, simulations, c_puct, 'cpu')
 
     step_count = 0
     while True:
-        # Gradual temperature decay: 1.0 → 0.1 over 30 moves
-        temp = max(0.1, 1.0 - step_count * 0.03)
-
-        action, action_probs = agent.select_move(env, temp, add_noise=True)
-
         current_player = info['current_player']
         board = obs['observation']
+        action_mask = obs['action_mask']
+
+        if step_count < 5:
+            # First 5 moves: uniform random for diverse openings
+            valid_actions = np.where(action_mask == 1)[0]
+            action = np.random.choice(valid_actions)
+            action_probs = action_mask.astype(np.float32)
+            action_probs /= action_probs.sum()
+        else:
+            # After move 5: MCTS with gradual temperature decay
+            temp = max(0.1, 1.0 - (step_count - 5) * 0.03)
+            action, action_probs = agent.select_move(env, temp, add_noise=True)
 
         canonical_board = board.copy()
         if current_player == PLAYER_BLUE:
@@ -62,29 +74,23 @@ def self_play_worker(model_config, model_state, simulations, c_puct):
         step_count += 1
 
         if terminated:
-            # Determine Result
             winner = info['last_player']
-            if reward == 1.0:
-                result_str = f"Player {winner} Won"
-            else:
-                result_str = "Draw"
+            result = 1 if reward == 1.0 else 0
 
             result_examples = []
             for ex_board, ex_probs, ex_player in examples:
                 outcome = 0
-                if reward == 1.0:  # Win
+                if reward == 1.0:
                     outcome = 1 if ex_player == info['last_player'] else -1
-                elif reward == 0.0:  # Draw
-                    outcome = 0
-
                 result_examples.append((ex_board, ex_probs, outcome))
-            return result_examples, step_count, result_str
+
+            return result_examples, step_count, result, winner
 
 
 def eval_worker(model_config, challenger_state, champion_state, simulations, c_puct, p1_is_challenger):
+    """Run one evaluation game in a worker process."""
     torch.set_num_threads(1)
 
-    # Rebuild models with correct architecture
     challenger = Connect4Net(
         num_channels=model_config['num_channels'],
         num_res_blocks=model_config['num_blocks']
@@ -103,19 +109,15 @@ def eval_worker(model_config, challenger_state, champion_state, simulations, c_p
     _, info = env.reset()
 
     if p1_is_challenger:
-        p1_model = challenger
-        p2_model = champion
+        agent1 = AlphaZeroAgent(challenger, simulations, c_puct, 'cpu')
+        agent2 = AlphaZeroAgent(champion, simulations, c_puct, 'cpu')
     else:
-        p1_model = champion
-        p2_model = challenger
-
-    agent1 = AlphaZeroAgent(p1_model, simulations, c_puct, 'cpu')
-    agent2 = AlphaZeroAgent(p2_model, simulations, c_puct, 'cpu')
+        agent1 = AlphaZeroAgent(champion, simulations, c_puct, 'cpu')
+        agent2 = AlphaZeroAgent(challenger, simulations, c_puct, 'cpu')
 
     step_count = 0
     terminated = False
     while not terminated:
-        # Use temperature + noise for first 8 moves to create diverse openings
         if step_count < 8:
             temp = 0.8
             noise = True
@@ -136,15 +138,12 @@ def eval_worker(model_config, challenger_state, champion_state, simulations, c_p
         winner_id = info['last_player']
         if winner_id == PLAYER_RED:
             result = 1 if p1_is_challenger else -1
-            winner_name = "Challenger" if p1_is_challenger else "Champion"
         else:
             result = -1 if p1_is_challenger else 1
-            winner_name = "Champion" if p1_is_challenger else "Challenger"
     else:
         result = 0
-        winner_name = "Draw"
 
-    return result, step_count, winner_name
+    return result, step_count
 
 
 class Trainer:
@@ -152,8 +151,6 @@ class Trainer:
         self.args = args
         self.cpu_device = torch.device('cpu')
         self.train_device = torch.device('mps' if torch.backends.mps.is_available() else 'cpu')
-        log(f"Training device: {self.train_device}")
-        log(f"Self-play/Eval device: {self.cpu_device}")
 
         self.model = Connect4Net(
             num_channels=self.args['num_channels'],
@@ -164,17 +161,12 @@ class Trainer:
         )
 
         # Print Configuration and Model Summary
-        log("=" * 40)
-        log("  TRAINING INITIALIZED")
-        log("=" * 40)
-        log("Configuration:")
-        for k, v in self.args.items():
-            log(f"  {k}: {v}")
-
         num_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
-        log("Model Details:")
-        log(f"  Parameters: {num_params:,}")
-        log("=" * 40)
+        log("TRAINING INITIALIZED", section=True)
+        log(f"  Model: {self.args['num_blocks']} blocks, {self.args['num_channels']} channels, {num_params:,} params")
+        log(f"  Training: {self.args['iterations']} iters, {self.args['num_self_play_games']} games/iter, {self.args['num_simulations']} sims")
+        log(f"  Learning: LR={self.args['lr']}, batch={self.args['batch_size']}, epochs={self.args['epochs']}")
+        log(f"  Device: {self.train_device}")
 
         # Scheduler: Reduce LR when loss plateaus
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -193,40 +185,31 @@ class Trainer:
 
         if self.args['resume']:
             if os.path.isfile(self.args['resume']):
-                log(f"Loading checkpoint from {self.args['resume']}")
                 checkpoint = torch.load(self.args['resume'], weights_only=False)
                 self.model.load_state_dict(checkpoint['model_state_dict'])
                 self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                # Note: Scheduler state is NOT loaded to allow LR schedule changes
                 self.start_iteration = checkpoint['iteration'] + 1
-                log(f"Resuming from iteration {self.start_iteration}")
+                log(f"  Resuming from iteration {self.start_iteration}")
             else:
-                log(f"Checkpoint not found at {self.args['resume']}")
+                log(f"  Warning: Checkpoint not found at {self.args['resume']}")
 
         # Initialize persistent executor
         self.executor = ProcessPoolExecutor(max_workers=self.args['workers'])
 
         # Save initial model as best_model.pt if it doesn't exist
-        # This ensures there's always a champion to play against
         best_model_path = os.path.join(self.checkpoint_dir, "best_model.pt")
         if not os.path.exists(best_model_path):
-            log("Saving initial model as best_model.pt")
-            torch.save(
-                {'model_state_dict': self.model.state_dict()},
-                best_model_path
-            )
+            torch.save({'model_state_dict': self.model.state_dict()}, best_model_path)
 
     def run(self):
         try:
             for i in range(self.start_iteration, self.args['iterations']):
-                log(f"Iteration {i+1}/{self.args['iterations']}")
+                log(f"ITERATION {i+1}/{self.args['iterations']}", section=True)
 
                 # 1. Self Play
-                # Get CPU state dict for workers
                 model_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
                 new_examples = self.self_play(model_state)
                 self.examples.extend(new_examples)
-                log(f"Replay Buffer Size: {len(self.examples)}")
 
                 # 2. Train
                 champion_state = copy.deepcopy(model_state)
@@ -238,22 +221,15 @@ class Trainer:
                 current_lr = self.optimizer.param_groups[0]['lr']
 
                 if current_lr < old_lr:
-                    log(f"Learning Rate reduced: {old_lr:.6f} -> {current_lr:.6f}")
-                else:
-                    log(f"Learning Rate: {current_lr:.6f}")
+                    log(f"[LR] Reduced: {old_lr:.6f} -> {current_lr:.6f}")
 
                 # 3. Evaluate (for monitoring only - no gating)
-                log("Evaluating against previous version...")
                 challenger_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
                 win_ratio = self.evaluate(challenger_state, champion_state)
-                log(f"Win Ratio vs Previous: {win_ratio:.2f}")
 
-                if win_ratio >= 0.55:
-                    log("Improved over previous iteration!")
-                elif win_ratio <= 0.45:
-                    log("Regression detected (keeping new model anyway)")
-                else:
-                    log("Similar performance to previous iteration")
+                # Summary
+                status = "IMPROVED" if win_ratio >= 0.55 else "REGRESSED" if win_ratio <= 0.45 else "STABLE"
+                log(f"[Summary] Loss={train_loss:.4f}, LR={current_lr:.6f}, Buffer={len(self.examples)}, Status={status}")
 
                 # Save checkpoint state (always keep trained model)
                 checkpoint_state = {
@@ -276,37 +252,48 @@ class Trainer:
             self.executor.shutdown()
 
     def self_play(self, model_state):
+        """Run self-play games using parallel CPU workers."""
         examples = []
         num_games = self.args['num_self_play_games']
 
-        # Prepare config for workers to rebuild model
         model_config = {
             'num_channels': self.args['num_channels'],
             'num_blocks': self.args['num_blocks']
         }
+
+        log(f"[Self-Play] Running {num_games} games ({self.args['workers']} workers)...")
 
         futures = [
             self.executor.submit(
                 self_play_worker, model_config, model_state,
                 self.args['num_simulations'], self.args['c_puct']
             )
-            for i in range(num_games)
+            for _ in range(num_games)
         ]
 
-        for i, future in enumerate(as_completed(futures)):
-            game_examples, step_count, result_str = future.result()
+        wins = {1: 0, 2: 0, 'draw': 0}
+        total_steps = 0
+        for future in as_completed(futures):
+            game_examples, step_count, result, winner = future.result()
             examples += game_examples
-            log(f"[Self Play] Game {i+1} finished in {step_count} steps. Result: {result_str}")
+            total_steps += step_count
+            if result == 1:
+                wins[winner] += 1
+            else:
+                wins['draw'] += 1
 
-        log(f"Self Play collected {len(examples)} examples")
+        avg_steps = total_steps / num_games
+        log(f"[Self-Play] Done: {len(examples)} examples, avg {avg_steps:.1f} steps/game")
+        log(f"[Self-Play] Results: P1={wins[1]}, P2={wins[2]}, Draws={wins['draw']}")
         return examples
 
     def train(self, examples):
-        log("Training...")
+        log(f"[Training] {len(examples)} examples, {self.args['epochs']} epochs...")
         self.model.train()
         batch_size = self.args['batch_size']
         epochs = self.args['epochs']
 
+        first_loss = None
         for epoch in range(epochs):
             random.shuffle(examples)
             batch_count = int(len(examples) / batch_size)
@@ -352,11 +339,11 @@ class Trainer:
             avg_loss = total_loss / batch_count
             avg_loss_v = total_loss_v / batch_count
             avg_loss_pi = total_loss_pi / batch_count
-            log(
-                f"Epoch {epoch+1}/{epochs} - "
-                f"Loss: {avg_loss:.4f} (V: {avg_loss_v:.4f}, P: {avg_loss_pi:.4f})"
-            )
 
+            if first_loss is None:
+                first_loss = avg_loss
+
+        log(f"[Training] Loss: {first_loss:.4f} -> {avg_loss:.4f} (V={avg_loss_v:.4f}, P={avg_loss_pi:.4f})")
         return avg_loss
 
     def evaluate(self, challenger_state, champion_state):
@@ -368,11 +355,12 @@ class Trainer:
         if games == 0:
             return 0
 
-        # Prepare config for workers to rebuild model
         model_config = {
             'num_channels': self.args['num_channels'],
             'num_blocks': self.args['num_blocks']
         }
+
+        log(f"[Eval] Running {games} games...")
 
         futures = [
             self.executor.submit(
@@ -382,15 +370,18 @@ class Trainer:
             for i in range(games)
         ]
 
-        for i, future in enumerate(as_completed(futures)):
-            result, step_count, winner_name = future.result()
+        total_steps = 0
+        for future in as_completed(futures):
+            result, step_count = future.result()
+            total_steps += step_count
             if result == 1:
                 challenger_wins += 1
             elif result == -1:
                 champion_wins += 1
             else:
                 draws += 1
-            log(f"[Evaluation] Game {i+1} finished in {step_count} steps. Winner: {winner_name}")
 
-        log(f"Challenger: {challenger_wins}, Champion: {champion_wins}, Draws: {draws}")
-        return (challenger_wins + 0.5 * draws) / games
+        win_ratio = (challenger_wins + 0.5 * draws) / games
+        avg_steps = total_steps / games
+        log(f"[Eval] New={challenger_wins}, Old={champion_wins}, Draws={draws} | Win Rate: {win_ratio:.0%} | Avg Steps: {avg_steps:.1f}")
+        return win_ratio

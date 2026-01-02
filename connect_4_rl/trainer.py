@@ -169,11 +169,14 @@ class Trainer:
         log(f"  Device: {self.train_device}")
 
         # Scheduler: Reduce LR when loss plateaus
+        # threshold=0.01 means loss must improve by 1% to count as progress
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
             mode='min',
             factor=0.5,
-            patience=5,
+            patience=3,
+            threshold=0.01,
+            threshold_mode='rel',
             min_lr=1e-6,
         )
 

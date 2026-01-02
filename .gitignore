@@ -207,4 +207,5 @@ marimo/_lsp/
 __marimo__/
 
 # Checkpoints
-checkpoints/.DS_Store
+checkpoints/
+.DS_Store

@@ -14,7 +14,7 @@ def main():
         help="Number of games to play in self-play"
     )
     parser.add_argument(
-        "--epochs", type=int, default=10,
+        "--epochs", type=int, default=3,
         help="Number of epochs for the training phase"
     )
     parser.add_argument(
@@ -34,7 +34,7 @@ def main():
         help="Number of parallel workers for self-play and evaluation"
     )
     parser.add_argument(
-        "--max-buffer-size", type=int, default=50000,
+        "--max-buffer-size", type=int, default=100000,
         help="Maximum number of examples to store in replay buffer"
     )
     parser.add_argument(

@@ -230,11 +230,12 @@ class Trainer:
             for i in range(self.start_iteration, self.args['iterations']):
                 log(f"ITERATION {i+1}/{self.args['iterations']}", section=True)
 
-                # 1. Self Play - always use best model for high-quality data
-                new_examples = self.self_play(self.best_model_state)
+                # 1. Self Play - challenger generates its own training data
+                challenger_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
+                new_examples = self.self_play(challenger_state)
                 self.examples.extend(new_examples)
 
-                # 2. Train - always update latest model for gradient continuity
+                # 2. Train - challenger learns from its own games
                 train_loss = self.train(list(self.examples))
 
                 # Step the scheduler after a burn-in period (skip first 20 iterations)
@@ -246,7 +247,7 @@ class Trainer:
                 if current_lr < old_lr:
                     log(f"[LR] Reduced: {old_lr:.6f} -> {current_lr:.6f}")
 
-                # 3. Evaluate trained model against best model
+                # 3. Evaluate trained model against best model (gating)
                 challenger_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
                 win_ratio = self.evaluate(challenger_state, self.best_model_state)
 
@@ -266,6 +267,9 @@ class Trainer:
                     checkpoint_state,
                     os.path.join(self.checkpoint_dir, f"checkpoint_{i}.pt")
                 )
+
+                # Clean up old checkpoints (keep only last 5)
+                self._cleanup_old_checkpoints(keep_last=5)
 
                 # Gating: Update best_model if improved
                 if i == 0:
@@ -296,6 +300,29 @@ class Trainer:
 
         finally:
             self.executor.shutdown()
+
+    def _cleanup_old_checkpoints(self, keep_last=5):
+        """Remove old checkpoints, keeping only the most recent ones."""
+        import glob
+        import re
+
+        checkpoint_pattern = os.path.join(self.checkpoint_dir, "checkpoint_*.pt")
+        checkpoints = glob.glob(checkpoint_pattern)
+
+        # Extract iteration numbers and sort
+        def get_iteration(path):
+            match = re.search(r'checkpoint_(\d+)\.pt$', path)
+            return int(match.group(1)) if match else -1
+
+        checkpoints_with_iter = [(cp, get_iteration(cp)) for cp in checkpoints]
+        checkpoints_with_iter.sort(key=lambda x: x[1], reverse=True)
+
+        # Remove old checkpoints (keep best_model.pt always)
+        for checkpoint_path, _ in checkpoints_with_iter[keep_last:]:
+            try:
+                os.remove(checkpoint_path)
+            except OSError:
+                pass
 
     def self_play(self, model_state):
         """Run self-play games using parallel CPU workers."""

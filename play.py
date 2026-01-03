@@ -4,6 +4,10 @@
 import argparse
 import os
 import sys
+import warnings
+
+# Suppress pkg_resources deprecation warning from pygame
+warnings.filterwarnings("ignore", category=UserWarning, message="pkg_resources is deprecated as an API")
 
 import pygame
 import torch

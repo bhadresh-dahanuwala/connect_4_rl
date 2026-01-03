@@ -1,3 +1,5 @@
+nohup poetry run python -u train.py --resume checkpoints/checkpoint_49.pt > train.log 2>&1 &
+
 ---
   Step 1: SSH Key for GitHub
 

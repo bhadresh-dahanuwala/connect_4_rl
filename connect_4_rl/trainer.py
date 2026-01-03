@@ -184,9 +184,10 @@ class Trainer:
             self.optimizer,
             mode='min',
             factor=0.5,
-            patience=3,
+            patience=4,
             threshold=0.01,
             threshold_mode='rel',
+            cooldown=10,
             min_lr=1e-6,
         )
 
@@ -213,8 +214,8 @@ class Trainer:
         # Training updates self.model (latest), self-play uses best_model_state
         best_model_path = os.path.join(self.checkpoint_dir, "best_model.pt")
         if os.path.exists(best_model_path):
-            best_checkpoint = torch.load(best_model_path, weights_only=False)
-            self.best_model_state = best_checkpoint['model_state_dict']
+            best_checkpoint = torch.load(best_model_path, weights_only=False, map_location='cpu')
+            self.best_model_state = {k: v.cpu() for k, v in best_checkpoint['model_state_dict'].items()}
             log(f"  Loaded best model from {best_model_path}")
         else:
             self.best_model_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
@@ -236,9 +237,10 @@ class Trainer:
                 # 2. Train - always update latest model for gradient continuity
                 train_loss = self.train(list(self.examples))
 
-                # Step the scheduler
+                # Step the scheduler after a burn-in period (skip first 20 iterations)
                 old_lr = self.optimizer.param_groups[0]['lr']
-                self.scheduler.step(train_loss)
+                if i >= 20:
+                    self.scheduler.step(train_loss)
                 current_lr = self.optimizer.param_groups[0]['lr']
 
                 if current_lr < old_lr:
@@ -249,7 +251,7 @@ class Trainer:
                 win_ratio = self.evaluate(challenger_state, self.best_model_state)
 
                 # Summary
-                status = "IMPROVED" if win_ratio >= 0.55 else "REGRESSED" if win_ratio <= 0.45 else "STABLE"
+                status = "IMPROVED" if win_ratio >= 0.62 else "REGRESSED" if win_ratio <= 0.45 else "STABLE"
                 log(f"[Summary] Loss={train_loss:.4f}, LR={current_lr:.6f}, Buffer={len(self.examples)}, Status={status}")
 
                 # Save checkpoint state (always keep trained model history)
@@ -274,7 +276,7 @@ class Trainer:
                         os.path.join(self.checkpoint_dir, "best_model.pt")
                     )
                     self.patience_counter = 0
-                elif win_ratio >= 0.55:
+                elif win_ratio >= 0.62:
                     log(f"  > New Champion! Saving best_model.pt (Win Rate: {win_ratio:.0%})")
                     self.best_model_state = challenger_state
                     torch.save(

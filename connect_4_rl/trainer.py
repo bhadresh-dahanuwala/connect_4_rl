@@ -1,4 +1,3 @@
-import copy
 import os
 import random
 from collections import deque
@@ -210,23 +209,31 @@ class Trainer:
         # Initialize persistent executor
         self.executor = ProcessPoolExecutor(max_workers=self.args['workers'])
 
-        # Save initial model as best_model.pt if it doesn't exist
+        # Track best model state separately for self-play
+        # Training updates self.model (latest), self-play uses best_model_state
         best_model_path = os.path.join(self.checkpoint_dir, "best_model.pt")
-        if not os.path.exists(best_model_path):
-            torch.save({'model_state_dict': self.model.state_dict()}, best_model_path)
+        if os.path.exists(best_model_path):
+            best_checkpoint = torch.load(best_model_path, weights_only=False)
+            self.best_model_state = best_checkpoint['model_state_dict']
+            log(f"  Loaded best model from {best_model_path}")
+        else:
+            self.best_model_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
+            torch.save({'model_state_dict': self.best_model_state}, best_model_path)
+
+        # Patience for regression
+        self.patience_counter = 0
+        self.max_patience = 3
 
     def run(self):
         try:
             for i in range(self.start_iteration, self.args['iterations']):
                 log(f"ITERATION {i+1}/{self.args['iterations']}", section=True)
 
-                # 1. Self Play
-                model_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
-                new_examples = self.self_play(model_state)
+                # 1. Self Play - always use best model for high-quality data
+                new_examples = self.self_play(self.best_model_state)
                 self.examples.extend(new_examples)
 
-                # 2. Train
-                champion_state = copy.deepcopy(model_state)
+                # 2. Train - always update latest model for gradient continuity
                 train_loss = self.train(list(self.examples))
 
                 # Step the scheduler
@@ -237,9 +244,9 @@ class Trainer:
                 if current_lr < old_lr:
                     log(f"[LR] Reduced: {old_lr:.6f} -> {current_lr:.6f}")
 
-                # 3. Evaluate (for monitoring only - no gating)
+                # 3. Evaluate trained model against best model
                 challenger_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
-                win_ratio = self.evaluate(challenger_state, champion_state)
+                win_ratio = self.evaluate(challenger_state, self.best_model_state)
 
                 # Summary
                 status = "IMPROVED" if win_ratio >= 0.55 else "REGRESSED" if win_ratio <= 0.45 else "STABLE"
@@ -258,23 +265,33 @@ class Trainer:
                     os.path.join(self.checkpoint_dir, f"checkpoint_{i}.pt")
                 )
 
-                # Gating: Only update best_model.pt if we improved or it's the first run
+                # Gating: Update best_model if improved
                 if i == 0:
                     log(f"  > Initial model saved to best_model.pt")
+                    self.best_model_state = challenger_state
                     torch.save(
                         checkpoint_state,
                         os.path.join(self.checkpoint_dir, "best_model.pt")
                     )
+                    self.patience_counter = 0
                 elif win_ratio >= 0.55:
                     log(f"  > New Champion! Saving best_model.pt (Win Rate: {win_ratio:.0%})")
+                    self.best_model_state = challenger_state
                     torch.save(
                         checkpoint_state,
                         os.path.join(self.checkpoint_dir, "best_model.pt")
                     )
+                    self.patience_counter = 0
                 else:
+                    self.patience_counter += 1
                     log(f"  > Model did not improve (Win Rate: {win_ratio:.0%}). Keeping previous best.")
-                    log("  > Reverting to previous champion for next self-play round.")
-                    self.model.load_state_dict(champion_state)
+                    log(f"  > Patience: {self.patience_counter}/{self.max_patience}")
+
+                    if self.patience_counter >= self.max_patience:
+                        log("  > Max patience reached. Hard reset: Reverting training model to champion.")
+                        self.model.load_state_dict(self.best_model_state)
+                        self.patience_counter = 0
+
         finally:
             self.executor.shutdown()
 

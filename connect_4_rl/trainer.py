@@ -259,14 +259,22 @@ class Trainer:
                 )
 
                 # Gating: Only update best_model.pt if we improved or it's the first run
-                if win_ratio >= 0.55 or i == 0:
+                if i == 0:
+                    log(f"  > Initial model saved to best_model.pt")
+                    torch.save(
+                        checkpoint_state,
+                        os.path.join(self.checkpoint_dir, "best_model.pt")
+                    )
+                elif win_ratio >= 0.55:
                     log(f"  > New Champion! Saving best_model.pt (Win Rate: {win_ratio:.0%})")
                     torch.save(
                         checkpoint_state,
                         os.path.join(self.checkpoint_dir, "best_model.pt")
                     )
                 else:
-                    log(f"  > Model did not improve (Win Rate: {win_ratio:.0%}). keeping previous best.")
+                    log(f"  > Model did not improve (Win Rate: {win_ratio:.0%}). Keeping previous best.")
+                    log("  > Reverting to previous champion for next self-play round.")
+                    self.model.load_state_dict(champion_state)
         finally:
             self.executor.shutdown()
 

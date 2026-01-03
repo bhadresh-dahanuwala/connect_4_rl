@@ -6,7 +6,7 @@ from connect_4_rl.trainer import Trainer
 def main():
     parser = argparse.ArgumentParser(description="Train Connect-4 AlphaZero Agent")
     parser.add_argument(
-        "--iterations", type=int, default=1000,
+        "--iterations", type=int, default=5000,
         help="Number of iterations to run"
     )
     parser.add_argument(
@@ -42,11 +42,11 @@ def main():
         help="Batch size for training"
     )
     parser.add_argument(
-        "--lr", type=float, default=0.0001,
+        "--lr", type=float, default=0.001,
         help="Learning rate"
     )
     parser.add_argument(
-        "--num-blocks", type=int, default=10,
+        "--num-blocks", type=int, default=20,
         help="Number of residual blocks in the neural network"
     )
     parser.add_argument(

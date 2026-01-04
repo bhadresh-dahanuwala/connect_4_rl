@@ -40,7 +40,8 @@ pip install -e .
 |------------|-----------|----------------------------------|
 | gymnasium  | >= 1.0.0  | RL environment interface         |
 | numpy      | >= 2.0.0  | Array operations                 |
-| torch      | >= 2.0.0  | Tensor operations (for training) |
+| torch      | >= 2.0.0  | Neural network training          |
+| pygame     | >= 2.6.0  | GUI for playing against AI       |
 
 ### Development Dependencies
 

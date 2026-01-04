@@ -294,3 +294,94 @@ obs2, _ = env.reset(seed=42)
 assert np.array_equal(obs1["observation"], obs2["observation"])
 print("Reproducible reset confirmed!")
 ```
+
+---
+
+## Playing Against the Trained Model
+
+### Using the GUI
+
+```bash
+# Play against the trained model
+poetry run python play.py
+
+# Let AI play first
+poetry run python play.py --ai-first
+
+# Adjust AI strength (more simulations = stronger)
+poetry run python play.py --simulations 800
+
+# Use a specific model
+poetry run python play.py --model checkpoints/checkpoint_100.pt
+```
+
+### Using the AlphaZero Agent Programmatically
+
+```python
+import torch
+from connect_4_rl import Connect4Env
+from connect_4_rl.model import Connect4Net
+from connect_4_rl.agent import AlphaZeroAgent
+
+# Load trained model
+model = Connect4Net(num_channels=128, num_res_blocks=20)
+checkpoint = torch.load("checkpoints/best_model.pt", map_location="cpu")
+model.load_state_dict(checkpoint["model_state_dict"])
+model.eval()
+
+# Create agent
+agent = AlphaZeroAgent(model, num_simulations=400, c_puct=2.0, device="cpu")
+
+# Play a game
+env = Connect4Env()
+obs, info = env.reset()
+
+while True:
+    # AI selects move
+    action, action_probs = agent.select_move(env, temperature=0.0, add_noise=False)
+    print(f"AI plays column {action} (confidence: {action_probs[action]:.1%})")
+
+    obs, reward, terminated, _, info = env.step(action)
+
+    if terminated:
+        if reward == 1.0:
+            print("AI wins!")
+        else:
+            print("Draw!")
+        break
+```
+
+---
+
+## Training Examples
+
+### Starting Training
+
+```bash
+# Basic training
+poetry run python train.py
+
+# Resume from checkpoint
+poetry run python train.py --resume checkpoints/checkpoint_49.pt
+
+# Custom configuration
+poetry run python train.py \
+    --iterations 1000 \
+    --self-play-games 200 \
+    --simulations 400 \
+    --eval-simulations 100 \
+    --workers 8
+```
+
+### Monitoring Training Progress
+
+```bash
+# Follow training logs in real-time
+tail -f training.log
+
+# Check current iteration
+grep "ITERATION" training.log | tail -5
+
+# Check champion updates
+grep "New Champion" training.log
+```

@@ -15,9 +15,11 @@ an 8x8 board, designed for self-play training.
 
 - [Installation](installation.md) - Setup and dependencies
 - [Environment Specification](environment.md) - Board, actions, rewards, state
+- [Architecture](architecture.md) - System design and component interaction
 - [Training Guide](training.md) - AlphaZero training loop and configuration
 - [API Reference](api.md) - Complete API documentation
 - [Examples](examples.md) - Usage examples and self-play training
+- [Troubleshooting](troubleshooting.md) - Common issues and solutions
 
 ## Quick Start
 
@@ -39,9 +41,26 @@ while not terminated:
 print(f"Game ended. Reward: {reward}")
 ```
 
+## Training
+
+Train the AlphaZero agent:
+
+```bash
+poetry run python train.py
+```
+
+## Play Against the AI
+
+Play against the trained model using the GUI:
+
+```bash
+poetry run python play.py
+```
+
 ## Requirements
 
 - Python >= 3.13
 - gymnasium >= 1.0.0
 - numpy
 - torch >= 2.0.0
+- pygame (for GUI)

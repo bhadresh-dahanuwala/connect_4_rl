@@ -337,15 +337,20 @@ Trainer(args: dict)
 **Parameters:**
 
 - `args`: Dictionary containing configuration:
-    - `iterations`: Total training iterations
-    - `num_self_play_games`: Games per iteration
-    - `num_simulations`: MCTS simulations per move
-    - `batch_size`: Training batch size
-    - `epochs`: Training epochs per iteration
-    - `lr`: Learning rate
-    - `num_channels`: Model complexity
-    - `num_blocks`: Model depth
-    - `workers`: Number of parallel processes
+    - `iterations`: Total training iterations (default: 5000)
+    - `num_self_play_games`: Games per iteration (default: 100)
+    - `num_simulations`: MCTS simulations per move in self-play (default: 400)
+    - `eval_simulations`: MCTS simulations per move in evaluation (default: 100)
+    - `num_eval_games`: Evaluation games per iteration (default: 50)
+    - `batch_size`: Training batch size (default: 512)
+    - `epochs`: Training epochs per iteration (default: 3)
+    - `lr`: Learning rate (default: 0.001)
+    - `c_puct`: MCTS exploration constant (default: 2.0)
+    - `num_channels`: Model channels (default: 128)
+    - `num_blocks`: Model residual blocks (default: 20)
+    - `max_buffer_size`: Replay buffer capacity (default: 50000)
+    - `workers`: Number of parallel processes (default: 10)
+    - `resume`: Path to checkpoint to resume from (default: None)
 
 #### run()
 
@@ -355,14 +360,30 @@ run()
 
 Executes the main training loop. Saves checkpoints to `checkpoints/`.
 
+The training follows a specific pattern:
+- **Iteration 1**: M0 vs M0, Train(M0)→M1, Eval M0 vs M1, pick Best
+- **Iteration 2**: Best vs Best, Train(Best)→M2, Eval Best vs M2
+- **Iteration 3+**: M{n-1} vs Best, Train(M{n-1})→M{n}, Eval M{n} vs Best
+
+New models must win ≥62% of evaluation games to become the new champion.
+
 #### self_play()
 
 ```python
-self_play(model_state: dict) -> list
+self_play(challenger_state: dict, champion_state: dict) -> list
 ```
 
-Generates training examples by playing games against itself.
-Uses uniform random moves for the first 5 steps, then MCTS with temperature decay.
+Generates training examples by playing challenger vs champion.
+Training examples are collected from the challenger's moves.
+
+**Parameters:**
+
+- `challenger_state`: State dict of the model being trained
+- `champion_state`: State dict of the current best model
+
+**Returns:**
+
+- List of training examples: `[(board, action_probs, outcome), ...]`
 
 #### evaluate()
 
@@ -371,7 +392,15 @@ evaluate(challenger_state: dict, champion_state: dict) -> float
 ```
 
 Evaluates a new model (challenger) against the current best (champion).
-Returns the win ratio for the challenger.
+
+**Parameters:**
+
+- `challenger_state`: State dict of the newly trained model
+- `champion_state`: State dict of the current best model
+
+**Returns:**
+
+- Win ratio for the challenger: `(wins + 0.5 * draws) / total_games`
 
 ---
 

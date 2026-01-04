@@ -243,21 +243,33 @@ class Trainer:
 
 
     def run(self):
+        # Track if next iteration should reset to Best (for iteration 2)
+        self.reset_to_best = False
+
         try:
             for i in range(self.start_iteration, self.args['iterations']):
                 log(f"ITERATION {i+1}/{self.args['iterations']}", section=True)
 
-                # 1. Self Play - Best vs Best (first iteration: M0 vs M0)
+                # 1. Self Play
                 if self.best_model_state is None:
-                    # First iteration: use random model (M0)
+                    # Iteration 1: M0 vs M0
                     m0_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
-                    self_play_state = m0_state
-                else:
-                    # Reset model to Best before training
+                    current_model_state = m0_state
+                    new_examples = self.self_play(m0_state, m0_state)
+                elif self.reset_to_best:
+                    # Iteration 2: Reset to Best, Best vs Best
                     self.model.load_state_dict(self.best_model_state)
-                    self_play_state = self.best_model_state
+                    current_model_state = self.best_model_state
+                    new_examples = self.self_play(self.best_model_state, self.best_model_state)
+                    self.reset_to_best = False
+                else:
+                    # Iteration 3+: M{prev_iter} vs Best
+                    # challenger = current model (M{prev_iter}, being trained)
+                    # champion = best model (to beat)
+                    # Examples are collected from challenger's moves
+                    current_model_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
+                    new_examples = self.self_play(current_model_state, self.best_model_state)
 
-                new_examples = self.self_play(self_play_state, self_play_state)
                 self.examples.extend(new_examples)
 
                 # 2. Train - creates new model from Best (or M0 for first iteration)
@@ -306,6 +318,8 @@ class Trainer:
                         {'model_state_dict': self.best_model_state},
                         os.path.join(self.checkpoint_dir, "best_model.pt")
                     )
+                    # Next iteration (iter 2) should reset to Best
+                    self.reset_to_best = True
                     continue
 
                 win_ratio = self.evaluate(trained_state, self.best_model_state)

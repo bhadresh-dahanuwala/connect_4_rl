@@ -23,7 +23,11 @@ def main():
     )
     parser.add_argument(
         "--simulations", type=int, default=400,
-        help="MCTS simulations per move"
+        help="MCTS simulations per move during self-play"
+    )
+    parser.add_argument(
+        "--eval-simulations", type=int, default=100,
+        help="MCTS simulations per move during evaluation (lower to test raw policy)"
     )
     parser.add_argument(
         "--cpuct", type=float, default=2.0,
@@ -34,7 +38,7 @@ def main():
         help="Number of parallel workers for self-play and evaluation"
     )
     parser.add_argument(
-        "--max-buffer-size", type=int, default=100000,
+        "--max-buffer-size", type=int, default=50000,
         help="Maximum number of examples to store in replay buffer"
     )
     parser.add_argument(
@@ -66,6 +70,7 @@ def main():
         'epochs': args.epochs,
         'num_eval_games': args.eval_games,
         'num_simulations': args.simulations,
+        'eval_simulations': args.eval_simulations,
         'c_puct': args.cpuct,
         'workers': args.workers,
         'max_buffer_size': args.max_buffer_size,

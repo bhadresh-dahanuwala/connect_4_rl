@@ -25,20 +25,41 @@ def log(message, section=False):
         print(f"[{timestamp}] {message}")
 
 
-def self_play_worker(model_config, model_state, simulations, c_puct):
-    """Run one self-play game in a worker process."""
+def self_play_worker(model_config, challenger_state, champion_state, simulations, c_puct, p1_is_challenger):
+    """Run one self-play game: challenger vs champion.
+
+    Training examples are collected only from the challenger's moves.
+    """
     torch.set_num_threads(1)
-    model = Connect4Net(
+
+    challenger = Connect4Net(
         num_channels=model_config['num_channels'],
         num_res_blocks=model_config['num_blocks']
     ).to('cpu')
-    model.load_state_dict(model_state)
-    model.eval()
+    challenger.load_state_dict(challenger_state)
+    challenger.eval()
+
+    champion = Connect4Net(
+        num_channels=model_config['num_channels'],
+        num_res_blocks=model_config['num_blocks']
+    ).to('cpu')
+    champion.load_state_dict(champion_state)
+    champion.eval()
 
     env = Connect4Env()
     obs, info = env.reset()
     examples = []
-    agent = AlphaZeroAgent(model, simulations, c_puct, 'cpu')
+
+    challenger_agent = AlphaZeroAgent(challenger, simulations, c_puct, 'cpu')
+    champion_agent = AlphaZeroAgent(champion, simulations, c_puct, 'cpu')
+
+    # Assign agents to players
+    if p1_is_challenger:
+        agent1, agent2 = challenger_agent, champion_agent
+        challenger_player = PLAYER_RED
+    else:
+        agent1, agent2 = champion_agent, challenger_agent
+        challenger_player = PLAYER_BLUE
 
     step_count = 0
     while True:
@@ -46,39 +67,37 @@ def self_play_worker(model_config, model_state, simulations, c_puct):
         board = obs['observation']
         action_mask = obs['action_mask']
 
-        # 1. Force 1 random move at start to guarantee opening diversity
-        # This prevents the model from collapsing into a single opening line
-        # while maintaining high data quality (unlike 5 random moves).
-        if step_count == 0:
-            valid_actions = np.where(action_mask == 1)[0]
-            action = np.random.choice(valid_actions)
-            # For training, we assign probability 1.0 to the chosen random move
-            # so the network learns this is a "valid" path to explore.
-            action_probs = np.zeros(len(action_mask), dtype=np.float32)
-            action_probs[action] = 1.0
+        # Select agent based on current player
+        if current_player == PLAYER_RED:
+            current_agent = agent1
+            is_challenger_turn = p1_is_challenger
         else:
-            # 2. Use MCTS with high temperature for exploration
-            # temp=1.0 allows probability-based selection (exploration)
-            # temp=0.0 forces "best" move selection (exploitation)
-            # We keep exploration high for 20 moves (approx 2/3 of avg game)
-            if step_count < 20:
-                temp = 1.0
-            else:
-                temp = 0.0
+            current_agent = agent2
+            is_challenger_turn = not p1_is_challenger
 
-            action, action_probs = agent.select_move(env, temp, add_noise=True)
+        # Temperature and noise for exploration
+        if step_count < 20:
+            temp = 1.0
+            noise = True
+        else:
+            temp = 0.0
+            noise = False
 
-        canonical_board = board.copy()
-        if current_player == PLAYER_BLUE:
-            canonical_board[0] = board[1]
-            canonical_board[1] = board[0]
+        action, action_probs = current_agent.select_move(env, temp, add_noise=noise)
 
-        # Symmetries
-        sym_board = np.flip(canonical_board, axis=2).copy()
-        sym_probs = np.flip(action_probs).copy()
+        # Only collect examples from challenger's moves
+        if is_challenger_turn:
+            canonical_board = board.copy()
+            if current_player == PLAYER_BLUE:
+                canonical_board[0] = board[1]
+                canonical_board[1] = board[0]
 
-        examples.append([canonical_board, action_probs, current_player])
-        examples.append([sym_board, sym_probs, current_player])
+            # Symmetries
+            sym_board = np.flip(canonical_board, axis=2).copy()
+            sym_probs = np.flip(action_probs).copy()
+
+            examples.append([canonical_board, action_probs, current_player])
+            examples.append([sym_board, sym_probs, current_player])
 
         obs, reward, terminated, _, info = env.step(action)
         step_count += 1
@@ -174,7 +193,8 @@ class Trainer:
         num_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         log("TRAINING INITIALIZED", section=True)
         log(f"  Model: {self.args['num_blocks']} blocks, {self.args['num_channels']} channels, {num_params:,} params")
-        log(f"  Training: {self.args['iterations']} iters, {self.args['num_self_play_games']} games/iter, {self.args['num_simulations']} sims")
+        eval_sims = self.args.get('eval_simulations', self.args['num_simulations'])
+        log(f"  Training: {self.args['iterations']} iters, {self.args['num_self_play_games']} games/iter, {self.args['num_simulations']} sims (eval: {eval_sims})")
         log(f"  Learning: LR={self.args['lr']}, batch={self.args['batch_size']}, epochs={self.args['epochs']}")
         log(f"  Device: {self.train_device}")
 
@@ -210,32 +230,37 @@ class Trainer:
         # Initialize persistent executor
         self.executor = ProcessPoolExecutor(max_workers=self.args['workers'])
 
-        # Track best model state separately for self-play
-        # Training updates self.model (latest), self-play uses best_model_state
+        # Track best model state separately for evaluation
+        # best_model_state is only set after first training iteration
         best_model_path = os.path.join(self.checkpoint_dir, "best_model.pt")
         if os.path.exists(best_model_path):
             best_checkpoint = torch.load(best_model_path, weights_only=False, map_location='cpu')
             self.best_model_state = {k: v.cpu() for k, v in best_checkpoint['model_state_dict'].items()}
             log(f"  Loaded best model from {best_model_path}")
         else:
-            self.best_model_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
-            torch.save({'model_state_dict': self.best_model_state}, best_model_path)
+            # Don't save yet - will save after first training iteration
+            self.best_model_state = None
 
-        # Patience for regression
-        self.patience_counter = 0
-        self.max_patience = 3
 
     def run(self):
         try:
             for i in range(self.start_iteration, self.args['iterations']):
                 log(f"ITERATION {i+1}/{self.args['iterations']}", section=True)
 
-                # 1. Self Play - challenger generates its own training data
-                challenger_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
-                new_examples = self.self_play(challenger_state)
+                # 1. Self Play - Best vs Best (first iteration: M0 vs M0)
+                if self.best_model_state is None:
+                    # First iteration: use random model (M0)
+                    m0_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
+                    self_play_state = m0_state
+                else:
+                    # Reset model to Best before training
+                    self.model.load_state_dict(self.best_model_state)
+                    self_play_state = self.best_model_state
+
+                new_examples = self.self_play(self_play_state, self_play_state)
                 self.examples.extend(new_examples)
 
-                # 2. Train - challenger learns from its own games
+                # 2. Train - creates new model from Best (or M0 for first iteration)
                 train_loss = self.train(list(self.examples))
 
                 # Step the scheduler after a burn-in period (skip first 20 iterations)
@@ -247,15 +272,10 @@ class Trainer:
                 if current_lr < old_lr:
                     log(f"[LR] Reduced: {old_lr:.6f} -> {current_lr:.6f}")
 
-                # 3. Evaluate trained model against best model (gating)
-                challenger_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
-                win_ratio = self.evaluate(challenger_state, self.best_model_state)
+                # 3. Get trained model state (M1, M2, etc.)
+                trained_state = {k: v.cpu() for k, v in self.model.state_dict().items()}
 
-                # Summary
-                status = "IMPROVED" if win_ratio >= 0.62 else "REGRESSED" if win_ratio <= 0.45 else "STABLE"
-                log(f"[Summary] Loss={train_loss:.4f}, LR={current_lr:.6f}, Buffer={len(self.examples)}, Status={status}")
-
-                # Save checkpoint state (always keep trained model history)
+                # Save checkpoint state
                 checkpoint_state = {
                     'iteration': i,
                     'model_state_dict': self.model.state_dict(),
@@ -271,32 +291,38 @@ class Trainer:
                 # Clean up old checkpoints (keep only last 5)
                 self._cleanup_old_checkpoints(keep_last=5)
 
-                # Gating: Update best_model if improved
-                if i == 0:
-                    log(f"  > Initial model saved to best_model.pt")
-                    self.best_model_state = challenger_state
+                # 4. Evaluate and update Best
+                if self.best_model_state is None:
+                    # First iteration: M0 vs M1, pick the better one
+                    win_ratio = self.evaluate(trained_state, m0_state)
+                    log(f"[Summary] Loss={train_loss:.4f}, LR={current_lr:.6f}, Buffer={len(self.examples)}, Status=INITIAL")
+                    if win_ratio >= 0.5:
+                        log(f"  > Trained model (M1) wins {win_ratio:.0%}. M1 becomes Best.")
+                        self.best_model_state = trained_state
+                    else:
+                        log(f"  > Random model (M0) wins {1-win_ratio:.0%}. M0 becomes Best.")
+                        self.best_model_state = m0_state
                     torch.save(
-                        checkpoint_state,
+                        {'model_state_dict': self.best_model_state},
                         os.path.join(self.checkpoint_dir, "best_model.pt")
                     )
-                    self.patience_counter = 0
-                elif win_ratio >= 0.62:
-                    log(f"  > New Champion! Saving best_model.pt (Win Rate: {win_ratio:.0%})")
-                    self.best_model_state = challenger_state
-                    torch.save(
-                        checkpoint_state,
-                        os.path.join(self.checkpoint_dir, "best_model.pt")
-                    )
-                    self.patience_counter = 0
-                else:
-                    self.patience_counter += 1
-                    log(f"  > Model did not improve (Win Rate: {win_ratio:.0%}). Keeping previous best.")
-                    log(f"  > Patience: {self.patience_counter}/{self.max_patience}")
+                    continue
 
-                    if self.patience_counter >= self.max_patience:
-                        log("  > Max patience reached. Hard reset: Reverting training model to champion.")
-                        self.model.load_state_dict(self.best_model_state)
-                        self.patience_counter = 0
+                win_ratio = self.evaluate(trained_state, self.best_model_state)
+
+                # Summary
+                status = "IMPROVED" if win_ratio >= 0.62 else "REGRESSED" if win_ratio <= 0.45 else "STABLE"
+                log(f"[Summary] Loss={train_loss:.4f}, LR={current_lr:.6f}, Buffer={len(self.examples)}, Status={status}")
+
+                if win_ratio >= 0.62:
+                    log(f"  > New Champion! Saving best_model.pt (Win Rate: {win_ratio:.0%})")
+                    self.best_model_state = trained_state
+                    torch.save(
+                        {'model_state_dict': self.best_model_state},
+                        os.path.join(self.checkpoint_dir, "best_model.pt")
+                    )
+                else:
+                    log(f"  > Model did not improve (Win Rate: {win_ratio:.0%}). Keeping previous best.")
 
         finally:
             self.executor.shutdown()
@@ -324,8 +350,8 @@ class Trainer:
             except OSError:
                 pass
 
-    def self_play(self, model_state):
-        """Run self-play games using parallel CPU workers."""
+    def self_play(self, challenger_state, champion_state):
+        """Run self-play games: challenger vs champion."""
         examples = []
         num_games = self.args['num_self_play_games']
 
@@ -338,10 +364,10 @@ class Trainer:
 
         futures = [
             self.executor.submit(
-                self_play_worker, model_config, model_state,
-                self.args['num_simulations'], self.args['c_puct']
+                self_play_worker, model_config, challenger_state, champion_state,
+                self.args['num_simulations'], self.args['c_puct'], i % 2 == 0
             )
-            for _ in range(num_games)
+            for i in range(num_games)
         ]
 
         wins = {1: 0, 2: 0, 'draw': 0}
@@ -439,10 +465,11 @@ class Trainer:
 
         log(f"[Eval] Running {games} games...")
 
+        eval_sims = self.args.get('eval_simulations', self.args['num_simulations'])
         futures = [
             self.executor.submit(
                 eval_worker, model_config, challenger_state, champion_state,
-                self.args['num_simulations'], self.args['c_puct'], i % 2 == 0
+                eval_sims, self.args['c_puct'], i % 2 == 0
             )
             for i in range(games)
         ]

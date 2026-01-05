@@ -209,4 +209,5 @@ __marimo__/
 
 # Checkpoints
 checkpoints/
+models/
 .DS_Store

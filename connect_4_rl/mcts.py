@@ -55,12 +55,13 @@ class MCTS:
             # Evaluation
             leaf_value = 0.0
             if terminated:
-                # If reward is 1.0 (Win), the player who just moved won.
-                # Value is +1.0 from winner's perspective. Backpropagation alternates
-                # signs, so parent (loser's move) will get -1.0.
-                # If reward is 0.0 (Draw), it's 0.0
+                # Terminal node represents the state after the winning move.
+                # The "would-be-next-player" (if game continued) is the LOSER.
+                # We store values from current player's perspective at each node.
+                # So terminal value should be -1 from loser's perspective.
+                # Backprop will then give parent (winner's state) +1.
                 if reward == 1.0:
-                    leaf_value = 1.0
+                    leaf_value = -1.0  # Loser's perspective
                 else:
                     leaf_value = 0.0
             else:
@@ -158,9 +159,10 @@ class Node:
             u = c_puct * child.prior * math.sqrt(self.visit_count) / (1 + child.visit_count)
 
             # Q value: value_sum / visit_count
-            # If visit_count is 0, Q is 0 (or we could use a default/parent value)
+            # Child stores values from the OPPONENT's perspective (the player at child's state).
+            # We want to maximize OUR expected value = minimize opponent's = negate child's Q.
             if child.visit_count > 0:
-                q = child.value_sum / child.visit_count
+                q = -child.value_sum / child.visit_count
             else:
                 q = 0
 

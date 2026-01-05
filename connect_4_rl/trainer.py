@@ -221,8 +221,10 @@ class Trainer:
             if os.path.isfile(self.args['resume']):
                 checkpoint = torch.load(self.args['resume'], weights_only=False)
                 self.model.load_state_dict(checkpoint['model_state_dict'])
-                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                self.start_iteration = checkpoint['iteration'] + 1
+                if 'optimizer_state_dict' in checkpoint:
+                    self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                if 'iteration' in checkpoint:
+                    self.start_iteration = checkpoint['iteration'] + 1
                 log(f"  Resuming from iteration {self.start_iteration}")
             else:
                 log(f"  Warning: Checkpoint not found at {self.args['resume']}")
@@ -325,10 +327,10 @@ class Trainer:
                 win_ratio = self.evaluate(trained_state, self.best_model_state)
 
                 # Summary
-                status = "IMPROVED" if win_ratio >= 0.62 else "REGRESSED" if win_ratio <= 0.45 else "STABLE"
+                status = "IMPROVED" if win_ratio > 0.6 else "REGRESSED" if win_ratio <= 0.45 else "STABLE"
                 log(f"[Summary] Loss={train_loss:.4f}, LR={current_lr:.6f}, Buffer={len(self.examples)}, Status={status}")
 
-                if win_ratio >= 0.62:
+                if win_ratio > 0.6:
                     log(f"  > New Champion! Saving best_model.pt (Win Rate: {win_ratio:.0%})")
                     self.best_model_state = trained_state
                     torch.save(

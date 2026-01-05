@@ -100,6 +100,52 @@ This is already handled in the current codebase.
 3. **Corrupted buffer**: Bad examples accumulated
    - Start fresh training without `--resume`
 
+### Value Head Predicting Wrong Signs
+
+**Symptom**: The `diagnose.py` script shows the value head outputting wrong signs for certain positions (e.g., negative value when current player can win immediately).
+
+**Example output**:
+```
+Red has 3-in-row, Red's turn:  value = -0.980  (expected: ~+1, can win)
+```
+
+**Investigation findings** (January 2026):
+
+1. **Training data is CORRECT**: Value targets are properly assigned (+1 for winner, -1 for loser)
+2. **MCTS is CORRECT**: Finds winning/blocking moves with high probability
+3. **Issue is learning speed**: The value head learns slower than the policy head
+
+**Specific patterns observed**:
+- Positions with **both players having 3-in-a-row**: Value head consistently wrong
+- Simple positions (e.g., vertical 3-in-a-row): Value head correct
+- The value for some positions oscillates between checkpoints
+
+**Why this happens**:
+- Complex positions (both players threatening) are rare in training data
+- The model needs more iterations to learn these patterns
+- Policy head learns faster because it has immediate feedback (which move won)
+
+**How to diagnose**:
+```bash
+# Check current model
+poetry run python diagnose.py
+
+# Check latest checkpoint
+poetry run python diagnose.py --latest
+```
+
+**Key metrics to watch**:
+- Value loss (V=X.XXX in training log) should decrease over time
+- "Winning position value" in diagnose.py should become positive
+- "Losing position value" should become negative
+
+**Solutions**:
+1. **Continue training**: The value head typically improves with more iterations
+2. **Monitor periodically**: Run `diagnose.py` every 50-100 iterations
+3. **Expected timeline**: Value head usually converges after 100+ iterations
+
+**Note**: The policy head learning correctly (50%+ probability on winning moves) is sufficient for good gameplay, even if value head is imperfect. MCTS compensates by exploring terminal states directly.
+
 ## GUI Issues
 
 ### Pygame Window Not Appearing

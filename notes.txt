@@ -1,65 +1,42 @@
-nohup poetry run python -u train.py --resume checkpoints/checkpoint_49.pt > train.log 2>&1 &
+Create the following test cases to check MCTS works correctly:
 
----
-  Step 1: SSH Key for GitHub
+1. 3-in-a-row straight: Place on the right end to win
+2. 3-in-a-row straight: Place on the left end to win
+3. 3-in-a-row diagonal: Place on the top end to win
+4. 3-in-a-row diagonal: Place on the bottom end to win
+5. 3-in-a-row anti-diagonal: Place on the top end to win
+6. 3-in-a-row anti-diagonal: Place on the bottom end to win
 
-  # Generate SSH key
-  ssh-keygen -t ed25519 -C "your-email@example.com"
+The above were to win. Add similar test cases to check whether the block also works.
 
-  # Start ssh-agent
-  eval "$(ssh-agent -s)"
-  ssh-add ~/.ssh/id_ed25519
+We also need to ensure the value heads work correctly.
 
-  # Display public key (copy this to GitHub)
-  cat ~/.ssh/id_ed25519.pub
 
-  Then add to GitHub: Settings → SSH and GPG keys → New SSH key
+Here is the logic. Please ensure it is implemented as per this logic.
 
-  # Test connection
-  ssh -T git@github.com
+```
+for iter in range(1, 5001):
+    if iter == 1:
+        M0 = Random Weights
+        Self Play = M0 vs M0
+        M1 = Train(M0)
+        Eval = M0 vs M1
+        If M0 win rate > M1 win rate then
+            Best = M0
+        Else
+            Best = M1
 
-  ---
-  Step 2: Install Python 3.13
-
-  Your project requires python >= 3.13. Ubuntu 24.04 ships with 3.12, so:
-
-  # Add deadsnakes PPA for Python 3.13
-  sudo add-apt-repository ppa:deadsnakes/ppa -y
-  sudo apt update
-  sudo apt install python3.13 python3.13-venv python3.13-dev -y
-
-  # Verify
-  python3.13 --version
-
-  ---
-  Step 3: Install Poetry
-
-  # Install poetry
-  curl -sSL https://install.python-poetry.org | python3.13 -
-
-  # Add to PATH
-  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-  source ~/.bashrc
-
-  # Verify
-  poetry --version
-
-  # Configure poetry to use Python 3.13
-  poetry env use python3.13
-
-  ---
-  Step 4: Clone & Setup Project
-
-  # Clone repo
-  git clone git@github.com:<your-username>/connect_4_rl.git
-  cd connect_4_rl
-
-  # Checkout AWS branch
-  git checkout aws_implementation
-
-  # Install dependencies
-  poetry install
-
-  # Verify CUDA
-  poetry run python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}, GPU: {torch.cuda.get_device_name(0)}')"
-  
+    else if iter == 2:
+        Self Play = Best vs Best
+        M2 = Train(Best)
+        Eval = Best vs M2
+        if M2 win rate >= 62% then
+            Best = M2
+    else:
+        prev_iter = iter - 1
+        Self Play = Best vs M{prev_iter}
+        M{iter} = Train(M{prev_iter})
+        Eval = Best vs M{iter}
+        if M{iter} win rate >= 62% then
+            Best = M{iter}
+```

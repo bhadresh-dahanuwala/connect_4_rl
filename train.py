@@ -18,15 +18,15 @@ def main():
         help="Number of epochs for the training phase"
     )
     parser.add_argument(
-        "--eval-games", type=int, default=50,
+        "--eval-games", type=int, default=100,
         help="Number of games to be played in the evaluation phase"
     )
     parser.add_argument(
-        "--simulations", type=int, default=400,
+        "--simulations", type=int, default=240,
         help="MCTS simulations per move during self-play"
     )
     parser.add_argument(
-        "--eval-simulations", type=int, default=100,
+        "--eval-simulations", type=int, default=25,
         help="MCTS simulations per move during evaluation (lower to test raw policy)"
     )
     parser.add_argument(
@@ -38,7 +38,7 @@ def main():
         help="Number of parallel workers for self-play and evaluation"
     )
     parser.add_argument(
-        "--max-buffer-size", type=int, default=50000,
+        "--max-buffer-size", type=int, default=25000,
         help="Maximum number of examples to store in replay buffer"
     )
     parser.add_argument(
